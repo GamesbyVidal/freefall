@@ -1,0 +1,1380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Freefall</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Rubik:wght@400;600&display=swap">
+<style>
+  /* Layout: one centered column. Score bar on top, the game "shaft" below it, sized to fit any screen. */
+  :root {
+    --shaft: #1b1530;      /* background of the falling shaft */
+    --rock: #2a2148;       /* darker rock specks on the walls */
+    --ledge: #e8a33d;      /* the platforms you must avoid */
+    --ledge-edge: #9c5a1c; /* shadow under each platform */
+    --diver: #8fd8de;      /* your character */
+    --ink: #f2e9dc;        /* text */
+    --muted: #a99fc4;      /* quieter text */
+    --page: #120e22;       /* page background around the game */
+    --coin: #f5d04a;       /* coins */
+    --display: "Bungee", "Arial Black", Impact, sans-serif;
+    --body: "Rubik", system-ui, -apple-system, "Segoe UI", sans-serif;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 12px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 1.6rem;
+    letter-spacing: 0.04em;
+    margin: 0;
+    color: var(--ledge);
+  }
+  .game {
+    /* 9:16 like a phone, but never taller than the screen allows */
+    width: min(100%, 400px, calc((100dvh - 150px) * 9 / 16));
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .hud {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .stat { display: flex; flex-direction: column; gap: 2px; }
+  .stat:nth-child(2) { text-align: center; }
+  .stat:nth-child(3) { text-align: right; }
+  .label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+  }
+  .value {
+    font-family: var(--display);
+    font-size: 1.15rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .stage:focus { outline: none; }
+  .stage {
+    position: relative;
+    aspect-ratio: 9 / 16;
+    max-width: 100%;
+    border-radius: 6px;
+    overflow: hidden;
+    touch-action: none;      /* stop the phone from scrolling while you play */
+    user-select: none;
+    -webkit-user-select: none;
+    background: var(--shaft);
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 24px;
+    text-align: center;
+    background: rgba(18, 14, 34, 0.78);
+  }
+  .overlay h2 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 2rem;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .overlay.start { gap: 16px; background: rgba(18, 14, 34, 0.92); }
+  .overlay.start h2 { font-size: 1.45rem; }
+  .hero { width: 104px; height: 104px; }
+  .tips {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    text-align: left;
+    max-width: 30ch;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.35;
+  }
+  .tips li { display: flex; align-items: center; gap: 12px; }
+  .tip-icon { width: 26px; height: 14px; flex-shrink: 0; border-radius: 3px; }
+  .tip-icon.ledge { background: linear-gradient(90deg, var(--ledge) 0 35%, transparent 35% 65%, var(--ledge) 65%); }
+  .tip-icon.glow { height: 5px; background: var(--diver); box-shadow: 0 0 8px var(--diver); }
+  .tip-icon.coin { width: 14px; margin-inline: 6px; border-radius: 50%; background: var(--coin); }
+  .tip-icon.zones { background: linear-gradient(90deg, #e8a33d 0 25%, #b58cff 25% 50%, #c4ecff 50% 75%, #ff6b3d 75%); }
+  .returning { font-size: 0.85rem; }
+  .returning strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .pulse { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { transform: scale(1.06); } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+  .overlay p { margin: 0; color: var(--muted); line-height: 1.5; max-width: 26ch; }
+  .overlay strong { color: var(--ink); }
+  button {
+    font-family: var(--display);
+    font-size: 1.05rem;
+    padding: 12px 28px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--ledge);
+    color: var(--page);
+    cursor: pointer;
+  }
+  button:focus-visible { outline: 3px solid var(--diver); outline-offset: 3px; }
+  .hint { font-size: 0.8rem; color: var(--muted); text-align: center; margin: 0; }
+  .medal {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--display);
+    font-size: 0.95rem;
+    letter-spacing: 0.06em;
+    padding: 4px 16px 4px 4px;
+    border-radius: 999px;
+    border: 2px solid var(--medal, var(--ledge));
+    color: var(--medal, var(--ledge));
+  }
+  button.ghost {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--muted);
+    font-family: var(--body);
+    font-size: 0.9rem;
+    padding: 8px 18px;
+  }
+  button.small { font-size: 0.75rem; padding: 4px 12px; flex-shrink: 0; }
+  .shop {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px 14px;
+    background: var(--page);
+    overflow-y: auto;
+    z-index: 2;
+  }
+  .shop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .shop-head h2 { font-family: var(--display); font-weight: 400; font-size: 1.3rem; margin: 0; }
+  .wallet { font-family: var(--display); color: var(--coin); font-variant-numeric: tabular-nums; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--rock);
+    background: var(--shaft);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 0.85rem;
+  }
+  .card.selected { border-color: var(--diver); box-shadow: 0 0 0 1px var(--diver) inset; }
+  .card.locked .price { color: var(--coin); }
+  .card .name { font-family: var(--display); font-size: 0.9rem; }
+  .card .price { color: var(--muted); font-size: 0.78rem; }
+  .card canvas { width: 48px; height: 48px; }
+  .card:disabled { opacity: 0.45; cursor: not-allowed; }
+  .shelf-title { font-family: var(--display); font-weight: 400; font-size: 1rem; margin: 6px 0 0; }
+  .badges { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 8px;
+    border-radius: 10px;
+    border: 2px solid var(--medal, var(--ledge));
+    text-align: center;
+  }
+  .badge canvas, .medal canvas { width: 56px; height: 56px; flex-shrink: 0; }
+  .medal canvas { width: 40px; height: 40px; }
+  .badge .name { font-family: var(--display); font-size: 0.8rem; color: var(--medal, var(--ledge)); }
+  .badge .price { color: var(--muted); font-size: 0.75rem; }
+  .badge.locked { border-style: dashed; border-color: var(--rock); }
+  .badge.locked .name { color: var(--muted); }
+  .footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .footer .hint { text-align: left; }
+</style>
+</head>
+<body>
+
+<h1>Freefall</h1>
+
+<div class="game">
+  <div class="hud">
+    <div class="stat"><span class="label">Coins</span><span class="value" id="coins">0</span></div>
+    <div class="stat"><span class="label">Level</span><span class="value" id="level">1</span></div>
+    <div class="stat"><span class="label">Best</span><span class="value" id="best">0</span></div>
+  </div>
+
+  <div class="stage" id="stage" tabindex="-1">
+    <canvas id="canvas"></canvas>
+
+    <div class="overlay start" id="startScreen">
+      <canvas class="hero" id="heroCanvas"></canvas>
+      <h2>How deep can you fall?</h2>
+      <ul class="tips">
+        <li><span class="tip-icon ledge"></span>Slip through the gaps. Touch a ledge and it's over.</li>
+        <li><span class="tip-icon glow"></span>Hit the glowing middle in a row for x2 and x3.</li>
+        <li><span class="tip-icon coin"></span>Grab coins to unlock new characters.</li>
+        <li><span class="tip-icon zones"></span>Every 2 levels: a new zone and a new badge.</li>
+      </ul>
+      <p class="returning" id="returning" hidden></p>
+      <button class="pulse" id="startButton">Tap to fall</button>
+      <button class="ghost" data-open-shop>Characters &amp; badges</button>
+    </div>
+
+    <div class="shop" id="shop" hidden>
+      <div class="shop-head">
+        <h2>Characters</h2>
+        <span class="wallet" id="wallet">0 coins</span>
+      </div>
+      <div class="cards" id="cards"></div>
+      <h3 class="shelf-title">Badges</h3>
+      <div class="badges" id="badgeShelf"></div>
+      <button class="ghost" id="closeShop">Back</button>
+    </div>
+
+    <div class="overlay" id="gameOverScreen" hidden>
+      <h2>Splat!</h2>
+      <div class="medal" id="medal" hidden></div>
+      <p id="finalText"></p>
+      <button id="restartButton">Tap to fall again</button>
+      <button class="ghost" id="shareButton">Copy my score</button>
+      <button class="ghost" data-open-shop>Characters &amp; badges</button>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p class="hint">Arrow keys, or hold the left or right side of the game with your mouse or finger.</p>
+    <button class="ghost small" id="soundButton">Sound: on</button>
+  </div>
+</div>
+
+<script>
+// ===== 1. SETTINGS =====
+// Change these numbers to change how the game feels.
+const WIDTH = 360;               // size of the game world (it gets scaled to fit your screen)
+const HEIGHT = 640;
+const START_FALL_SPEED = 185;    // how fast ledges rise toward you at level 1 (pixels per second)
+const SPEED_UP_PER_LEVEL = 1.05; // each level is 5% faster
+const LEDGES_PER_LEVEL = 15;     // pass this many ledges to reach the next level
+const SIDE_SPEED = 280;          // how fast you move left and right
+const LEDGE_GAP = 170;           // vertical space between one ledge and the next
+const HOLE_WIDTH = 80;           // how wide the gap in each ledge is
+const GAP_SPREAD = 0.85;         // how far apart gaps can be (1 = only just reachable, lower = easier)
+const LEDGE_THICKNESS = 16;
+const DIVER_SIZE = 13;           // radius of your character
+const HIT_FORGIVENESS = 3;       // a near miss by this many pixels still counts as a miss
+
+// Phone-only settings (the computer version ignores these)
+const TOUCH_FOLLOW = 1.3;        // how fast you chase your finger, compared to SIDE_SPEED
+const TOUCH_FORGIVENESS = 2;     // extra near-miss room on phones, since a finger is less exact than a key
+const DIVER_Y = 150;             // your character stays at this height; the world moves past
+const NEAR_MISS = 5;             // squeeze past a ledge edge closer than this for a "Close!" bonus
+const CENTER_ZONE = 14;          // pass this close to the middle of a gap to build a streak
+const STREAK_FOR_X2 = 3;         // center passes in a row for double points
+const STREAK_FOR_X3 = 6;         // ...and for triple points
+const COIN_CHANCE = 0.45;         // how often a gap has a coin in it (0.45 = 45% of gaps)
+const COIN_SIZE = 7;
+const RESTART_DELAY = 0.6;       // seconds after a crash before you can restart (stops accidental taps)
+
+// Zones: the shaft changes as you fall deeper. Each zone starts at a level
+// and has its own colors and its own twist.
+//   moving: how far (in pixels) gaps slide side to side. 0 = they stay still.
+//   ice:    true = you slide, so you need to start and stop early.
+const ZONES = [
+  { name: "The Mine Shaft", fromLevel: 1, shaft: "#1b1530", rock: "#2a2148", ledge: "#e8a33d", edge: "#9c5a1c", moving: 0,  ice: false,
+    twist: "", badge: "Canary" },
+  { name: "Crystal Caves", fromLevel: 3, shaft: "#131a35", rock: "#25305e", ledge: "#b58cff", edge: "#6a45b8", moving: 28, ice: false,
+    twist: "Gaps slide!", badge: "Crystal Clear" },
+  { name: "Ice Cavern",    fromLevel: 5, shaft: "#0e2230", rock: "#1d3b4f", ledge: "#c4ecff", edge: "#5d9cc0", moving: 0,  ice: true,
+    twist: "It's slippery!", badge: "Cool Under Pressure" },
+  { name: "Magma Core",    fromLevel: 7, shaft: "#2a0f12", rock: "#46191b", ledge: "#ff6b3d", edge: "#a32c14", moving: 40, ice: true,
+    twist: "Sliding gaps AND slippery!", badge: "Hot Shot" },
+];
+// Each zone also has a badge, earned the first time you reach it.
+const ICE_GRIP = 5;              // lower = more slippery on ice
+
+// Characters you can unlock with coins. "trail" is what follows you as you fall.
+const CHARACTERS = [
+  { id: "pebble", name: "Pebble", price: 0,   color: "#8fd8de", trail: "none" },
+  { id: "ember",  name: "Ember",  price: 25,  color: "#ff7a45", trail: "fire" },
+  { id: "frost",  name: "Frost",  price: 60,  color: "#cfeaff", trail: "sparkle" },
+  { id: "bubble", name: "Bubble", price: 120, color: "#9fd9ff", trail: "bubbles", ring: true },
+  { id: "goldie", name: "Goldie", price: 250, color: "#f5d04a", trail: "sparkle" },
+  { id: "comet",  name: "Comet",  price: 500, color: "#ffffff", trail: "streak" },
+];
+
+// ===== 2. GAME STATE =====
+// Everything the game needs to remember while it runs.
+let diverX, ledges, score, ledgesPassed, level, distanceFallen, specks;
+let streak = 0;                  // center passes in a row
+let popups = [];                 // floating messages like "Close! +1"
+let beatBestShown = false;
+let coins = loadNumber("freefall-coins", 0);   // your coin bank, kept between games
+let coinsThisRun = 0;
+let badges = loadList("freefall-badges", []);   // badges you've earned, kept forever
+let badgesThisRun = [];
+let diverSpeed = 0;              // your sideways speed (matters on ice)
+let clock = 0;                   // seconds since the game started, for sliding gaps
+let zoneFlash = 0;               // counts down while a new zone's name is shown
+let trail = [];                  // recent positions, for the character's trail
+let owned = loadList("freefall-owned", ["pebble"]);
+let chosen = loadText("freefall-character", "pebble");
+let state = "start";             // "start", "playing" or "crashed"
+let leftHeld = false, rightHeld = false;
+let levelFlash = 0;              // counts down while "LEVEL 2!" is shown
+let crashTime = 0;               // seconds since you crashed
+let shake = 0;                   // how hard the screen is shaking
+let splatBits = [];              // little pieces that fly out when you crash
+let best = loadNumber("freefall-best-score", 0);
+let bestLedges = loadNumber("freefall-best-ledges", 0);   // where the "YOUR BEST" line goes
+let soundOn = loadNumber("freefall-sound", 1) === 1;
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+// ===== 3. STARTING A NEW GAME =====
+function resetGame() {
+  diverX = WIDTH / 2;
+  score = 0;
+  ledgesPassed = 0;
+  streak = 0;
+  popups = [];
+  trail = [];
+  coinsThisRun = 0;
+  diverSpeed = 0;
+  clock = 0;
+  zoneFlash = 0;
+  beatBestShown = false;
+  level = 1;
+  distanceFallen = 0;
+  levelFlash = 0;
+  shake = 0;
+  splatBits = [];
+  ledges = [];
+  // Place the first few ledges below the character.
+  let y = HEIGHT;
+  let holeX = WIDTH / 2;
+  for (let i = 0; i < 5; i++) {
+    holeX = pickHole(holeX, i + 1);
+    ledges.push(makeLedge(y, holeX, i + 1, ledges.length ? ledges[ledges.length - 1].holeX : WIDTH / 2));
+    y += LEDGE_GAP;
+  }
+  // Little rock specks on the walls, so you can feel the falling.
+  specks = [];
+  for (let i = 0; i < 40; i++) {
+    specks.push({ x: Math.random() * WIDTH, y: Math.random() * HEIGHT, r: 1 + Math.random() * 2 });
+  }
+}
+
+// Choose where the hole in the next ledge goes. It stays close enough
+// to the last hole that you can always reach it in time.
+function pickHole(previousHoleX, number) {
+  // You can't slide sideways while you're still inside the last hole,
+  // so only count the open space between ledges. Then leave extra time
+  // for you to react, so the jump is never too far.
+  const openSpace = LEDGE_GAP - LEDGE_THICKNESS - DIVER_SIZE * 2;
+  const timeToReach = openSpace / currentSpeed();
+  let reach = SIDE_SPEED * timeToReach * GAP_SPREAD;
+  // Zones with sliding gaps or ice need gaps a bit closer together to stay fair.
+  const zone = zoneForLedge(number);
+  if (zone.ice) reach *= 0.75;
+  reach = Math.max(20, reach - zone.moving);
+  const min = Math.max(HOLE_WIDTH / 2, previousHoleX - reach);
+  const max = Math.min(WIDTH - HOLE_WIDTH / 2, previousHoleX + reach);
+  return min + Math.random() * (max - min);
+}
+
+// Each ledge remembers its number (1st, 2nd, 3rd...) and how close
+// you came to its edges, for the "Close!" bonus.
+function makeLedge(y, holeX, number, previousHoleX) {
+  // Some gaps get a coin, placed off-center so grabbing it is a choice.
+  // It goes on the side you're coming from, so it's always reachable.
+  let coin = null;
+  if (number > 1 && Math.random() < COIN_CHANCE) {
+    const side = previousHoleX < holeX ? -1 : 1;
+    const room = HOLE_WIDTH / 2 - COIN_SIZE - 4;
+    coin = { offset: side * (room * (0.5 + Math.random() * 0.5)), taken: false };
+  }
+  // In zones with sliding gaps, each gap gets its own starting point in the slide.
+  const zone = zoneForLedge(number);
+  return { y: y, holeX: holeX, homeX: holeX, slide: zone.moving, phase: Math.random() * Math.PI * 2,
+           number: number, passed: false, closest: Infinity, centerMiss: Infinity, coin: coin };
+}
+
+function zoneForLevel(lvl) {
+  let found = ZONES[0];
+  for (const zone of ZONES) if (lvl >= zone.fromLevel) found = zone;
+  return found;
+}
+
+// Which zone a ledge belongs to, from its number (ledges 1-15 are level 1, and so on).
+function zoneForLedge(number) {
+  return zoneForLevel(1 + Math.floor((number - 1) / LEDGES_PER_LEVEL));
+}
+
+function currentSpeed() {
+  return START_FALL_SPEED * Math.pow(SPEED_UP_PER_LEVEL, (level || 1) - 1);
+}
+
+// ===== 4. UPDATING THE GAME EACH FRAME =====
+// "dt" is how many seconds passed since the last frame (about 1/60).
+function update(dt) {
+  const speed = currentSpeed();
+
+  clock += dt;
+
+  // Move left or right. On ice you speed up and slow down gradually.
+  let wanted;
+  if (fingerX !== null) {
+    // Phone: glide toward your finger, slowing down as you get close.
+    const most = SIDE_SPEED * TOUCH_FOLLOW;
+    wanted = Math.max(-most, Math.min(most, (fingerX - diverX) * 12));
+  } else {
+    const direction = (rightHeld ? 1 : 0) - (leftHeld ? 1 : 0);
+    wanted = direction * SIDE_SPEED;
+  }
+  if (zoneForLevel(level).ice) diverSpeed += (wanted - diverSpeed) * Math.min(1, ICE_GRIP * dt);
+  else diverSpeed = wanted;
+  diverX += diverSpeed * dt;
+  if (diverX < DIVER_SIZE || diverX > WIDTH - DIVER_SIZE) diverSpeed = 0;   // bump the wall
+  diverX = Math.max(DIVER_SIZE, Math.min(WIDTH - DIVER_SIZE, diverX));
+
+  // Sliding gaps move gently side to side around their home spot.
+  for (const ledge of ledges) {
+    if (ledge.slide > 0) {
+      const x = ledge.homeX + Math.sin(clock * 1.6 + ledge.phase) * ledge.slide;
+      ledge.holeX = Math.max(HOLE_WIDTH / 2, Math.min(WIDTH - HOLE_WIDTH / 2, x));
+    }
+  }
+
+  // Move the whole world up, which makes it look like you're falling.
+  distanceFallen += speed * dt;
+  for (const t of trail) t.y -= speed * dt;
+  trail.push({ x: diverX, y: DIVER_Y, age: 0 });
+  for (const t of trail) t.age += dt;
+  trail = trail.filter((t) => t.age < 0.4);
+  for (const ledge of ledges) ledge.y -= speed * dt;
+  for (const s of specks) {
+    s.y -= speed * dt * 0.5;            // specks move slower, so they look farther away
+    if (s.y < 0) { s.y += HEIGHT; s.x = Math.random() * WIDTH; }
+  }
+
+  for (const ledge of ledges) {
+    // While you're inside a gap, measure how much space you have to spare.
+    const inside = ledge.y < DIVER_Y + DIVER_SIZE && ledge.y + LEDGE_THICKNESS > DIVER_Y - DIVER_SIZE;
+    if (inside) {
+      const spare = HOLE_WIDTH / 2 - Math.abs(diverX - ledge.holeX) - DIVER_SIZE;
+      ledge.closest = Math.min(ledge.closest, spare);
+      // How close you got to the exact middle at any moment inside the gap
+      ledge.centerMiss = Math.min(ledge.centerMiss, Math.abs(diverX - ledge.holeX));
+    }
+    // Grab the coin if you touch it.
+    if (ledge.coin && !ledge.coin.taken) {
+      const dx = diverX - (ledge.holeX + ledge.coin.offset);
+      const dy = DIVER_Y - (ledge.y + LEDGE_THICKNESS / 2);
+      if (dx * dx + dy * dy < (DIVER_SIZE + COIN_SIZE) ** 2) {
+        ledge.coin.taken = true;
+        coins++;
+        coinsThisRun++;
+        saveNumber("freefall-coins", coins);
+        playSound(1320, 0.05, "triangle", 0.07); setTimeout(() => playSound(1760, 0.08, "triangle", 0.07), 50);
+      }
+    }
+    // Did this ledge just go past you? That's a point.
+    if (!ledge.passed && ledge.y + LEDGE_THICKNESS < DIVER_Y - DIVER_SIZE) {
+      ledge.passed = true;
+      passLedge(ledge);
+    }
+    // Did you hit it? Instant death.
+    if (hitsLedge(ledge)) { crash(); return; }
+  }
+
+  // Remove ledges that went off the top, and add new ones at the bottom.
+  if (ledges[0].y < -LEDGE_THICKNESS) ledges.shift();
+  const last = ledges[ledges.length - 1];
+  if (last.y < HEIGHT + LEDGE_GAP) {
+    ledges.push(makeLedge(last.y + LEDGE_GAP, pickHole(last.homeX, last.number + 1), last.number + 1, last.homeX));
+  }
+
+  if (levelFlash > 0) levelFlash -= dt;
+  if (zoneFlash > 0) zoneFlash -= dt;
+  for (const pop of popups) { pop.life -= dt; pop.y -= 40 * dt; }
+  popups = popups.filter((pop) => pop.life > 0);
+}
+
+// Scoring for one ledge: streaks, near misses, levels and beating your best.
+function passLedge(ledge) {
+  ledgesPassed++;
+
+  // Streak: pass close to the middle of the gap again and again.
+  if (ledge.centerMiss <= CENTER_ZONE) streak++;
+  else streak = 0;
+  const points = multiplier();
+  score += points;
+  if (streak === STREAK_FOR_X2 || streak === STREAK_FOR_X3) {
+    addPopup("STREAK x" + multiplier() + "!", "ink");
+    playSound(660, 0.08); setTimeout(() => playSound(990, 0.12), 80);
+  }
+
+  // Near miss: you squeezed past an edge with almost no room.
+  if (ledge.closest < NEAR_MISS) {
+    score += 1;
+    addPopup("Close! +1", "ledge");
+    playSound(1200, 0.06, "triangle", 0.08);
+  }
+
+  // Your rule: every 15 ledges is a new level.
+  const newLevel = 1 + Math.floor(ledgesPassed / LEDGES_PER_LEVEL);
+  if (newLevel > level) {
+    level = newLevel;
+    levelFlash = 1.5;
+    if (zoneForLevel(level) !== zoneForLevel(level - 1)) {
+      levelFlash = 0;
+      zoneFlash = 2.5;
+      earnBadge(zoneForLevel(level));
+      playSound(392, 0.12); setTimeout(() => playSound(523, 0.12), 120); setTimeout(() => playSound(659, 0.25), 240);
+    }
+    playSound(523, 0.1); setTimeout(() => playSound(784, 0.15), 100);
+  } else {
+    playSound(880, 0.05);
+  }
+
+  // Went past the "YOUR BEST" line?
+  if (bestLedges > 0 && ledgesPassed === bestLedges + 1 && !beatBestShown) {
+    beatBestShown = true;
+    addPopup("NEW BEST DEPTH!", "ink");
+  }
+}
+
+function multiplier() {
+  if (streak >= STREAK_FOR_X3) return 3;
+  if (streak >= STREAK_FOR_X2) return 2;
+  return 1;
+}
+
+function addPopup(text, color) {
+  popups.push({ text: text, color: color, y: DIVER_Y + 55 + popups.length * 22, life: 1 });
+}
+
+// After a crash: the splat pieces fly and fall, and the screen shake fades.
+function updateCrash(dt) {
+  crashTime += dt;
+  shake = Math.max(0, shake - dt * 30);
+  for (const bit of splatBits) {
+    bit.x += bit.vx * dt;
+    bit.y += bit.vy * dt;
+    bit.vy += 900 * dt;                 // gravity pulls the pieces down
+  }
+  // Show the "Splat!" screen once the pieces have had a moment to fly.
+  if (crashTime >= RESTART_DELAY && document.getElementById("gameOverScreen").hidden) {
+    showGameOver();
+  }
+}
+
+// A ledge is two solid pieces with a hole between them.
+// You hit it if your circle overlaps either piece.
+function hitsLedge(ledge) {
+  const holeLeft = ledge.holeX - HOLE_WIDTH / 2;
+  const holeRight = ledge.holeX + HOLE_WIDTH / 2;
+  return circleTouchesBox(0, ledge.y, holeLeft, LEDGE_THICKNESS) ||
+         circleTouchesBox(holeRight, ledge.y, WIDTH - holeRight, LEDGE_THICKNESS);
+}
+
+function circleTouchesBox(x, y, w, h) {
+  const nearestX = Math.max(x, Math.min(diverX, x + w));
+  const nearestY = Math.max(y, Math.min(DIVER_Y, y + h));
+  const dx = diverX - nearestX;
+  const dy = DIVER_Y - nearestY;
+  const hitSize = DIVER_SIZE - HIT_FORGIVENESS - (touchMode ? TOUCH_FORGIVENESS : 0);
+  return dx * dx + dy * dy < hitSize * hitSize;
+}
+
+// ===== 5. DRAWING =====
+const colors = {};
+function readColors() {
+  const css = getComputedStyle(document.documentElement);
+  for (const name of ["shaft", "rock", "ledge", "ledge-edge", "diver", "ink", "muted", "coin"]) {
+    colors[name] = css.getPropertyValue("--" + name).trim();
+  }
+}
+
+function draw() {
+  ctx.save();
+  // Screen shake: nudge everything by a small random amount.
+  if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+
+  const zone = zoneForLevel(level);
+  ctx.fillStyle = zone.shaft;
+  ctx.fillRect(-20, -20, WIDTH + 40, HEIGHT + 40);
+
+  // Rock specks
+  ctx.fillStyle = zone.rock;
+  for (const s of specks) {
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Depth markers on the wall every 50 meters (10 pixels = 1 meter)
+  ctx.fillStyle = colors.muted;
+  ctx.font = "11px Rubik, sans-serif";
+  ctx.textAlign = "right";
+  const metersOnTop = distanceFallen / 10;
+  const firstMark = Math.ceil(metersOnTop / 50) * 50;
+  for (let m = firstMark; m < metersOnTop + HEIGHT / 10; m += 50) {
+    const y = (m - metersOnTop) * 10;
+    ctx.fillRect(WIDTH - 10, y, 10, 1);
+    ctx.fillText(m + " m", WIDTH - 14, y + 4);
+  }
+
+  // Ledges
+  for (const ledge of ledges) {
+    const holeLeft = ledge.holeX - HOLE_WIDTH / 2;
+    const holeRight = ledge.holeX + HOLE_WIDTH / 2;
+    const ledgeZone = zoneForLedge(ledge.number);   // each ledge wears its own zone's colors
+    ctx.fillStyle = ledgeZone.edge;
+    ctx.fillRect(0, ledge.y + 4, holeLeft, LEDGE_THICKNESS);
+    ctx.fillRect(holeRight, ledge.y + 4, WIDTH - holeRight, LEDGE_THICKNESS);
+    ctx.fillStyle = ledgeZone.ledge;
+    ctx.fillRect(0, ledge.y, holeLeft, LEDGE_THICKNESS - 4);
+    ctx.fillRect(holeRight, ledge.y, WIDTH - holeRight, LEDGE_THICKNESS - 4);
+
+    // Coin
+    if (ledge.coin && !ledge.coin.taken) {
+      const cx = ledge.holeX + ledge.coin.offset;
+      const cy = ledge.y + LEDGE_THICKNESS / 2;
+      ctx.fillStyle = colors.coin;
+      ctx.beginPath();
+      ctx.arc(cx, cy, COIN_SIZE, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = colors["ledge-edge"];
+      ctx.fillRect(cx - 1.5, cy - 4, 3, 8);
+    }
+
+    // The glowing center of each gap you haven't passed yet: aim here for streaks
+    if (!ledge.passed) {
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = colors.diver;
+      ctx.fillRect(ledge.holeX - CENTER_ZONE, ledge.y + 4, CENTER_ZONE * 2, 4);
+      ctx.globalAlpha = 1;
+    }
+
+    // A dashed line under the ledge where your best game ended
+    if (ledge.number === bestLedges + 1 && bestLedges > 0) {
+      ctx.strokeStyle = colors.diver;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(0, ledge.y + LEDGE_THICKNESS + 10);
+      ctx.lineTo(WIDTH, ledge.y + LEDGE_THICKNESS + 10);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = colors.diver;
+      ctx.font = "12px Bungee, Impact, sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("YOUR BEST", 8, ledge.y + LEDGE_THICKNESS + 26);
+    }
+  }
+
+  const me = currentCharacter();
+  if (state === "crashed") {
+    // Splat pieces instead of the diver
+    ctx.fillStyle = me.color;
+    for (const bit of splatBits) {
+      ctx.beginPath();
+      ctx.arc(bit.x, bit.y, bit.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    if (state === "playing") drawTrail(ctx, me);
+    if (state !== "start") drawCharacter(ctx, me, diverX, DIVER_Y, DIVER_SIZE);
+  }
+
+  // Big score in the middle of the screen while you play
+  if (state === "playing") {
+    ctx.fillStyle = colors.ink;
+    ctx.globalAlpha = 0.9;
+    ctx.font = "44px Bungee, Impact, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(score, WIDTH / 2, 70);
+    if (streak > 0) {
+      ctx.fillStyle = colors.diver;
+      ctx.font = "16px Bungee, Impact, sans-serif";
+      let streakText = "x3 streak";
+      if (streak < STREAK_FOR_X2) streakText = "streak " + streak + "/" + STREAK_FOR_X2;
+      else if (streak < STREAK_FOR_X3) streakText = "x2 · " + streak + "/" + STREAK_FOR_X3;
+      ctx.fillText(streakText, WIDTH / 2, 96);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Floating messages
+  ctx.textAlign = "center";
+  ctx.font = "16px Bungee, Impact, sans-serif";
+  for (const pop of popups) {
+    ctx.globalAlpha = Math.min(1, pop.life * 2);
+    ctx.fillStyle = colors[pop.color];
+    ctx.fillText(pop.text, WIDTH / 2, pop.y);
+  }
+  ctx.globalAlpha = 1;
+
+  // "LEVEL 2!" message
+  if (levelFlash > 0) {
+    ctx.globalAlpha = Math.min(1, levelFlash);
+    ctx.fillStyle = colors.ink;
+    ctx.font = "28px Bungee, Impact, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("LEVEL " + level + "!", WIDTH / 2, HEIGHT / 2);
+    ctx.globalAlpha = 1;
+  }
+
+  // New zone message
+  if (zoneFlash > 0) {
+    ctx.globalAlpha = Math.min(1, zoneFlash);
+    ctx.textAlign = "center";
+    ctx.fillStyle = zone.ledge;
+    ctx.font = "14px Bungee, Impact, sans-serif";
+    ctx.fillText("ENTERING", WIDTH / 2, HEIGHT / 2 - 34);
+    ctx.font = "30px Bungee, Impact, sans-serif";
+    ctx.fillText(zone.name.toUpperCase(), WIDTH / 2, HEIGHT / 2);
+    ctx.fillStyle = colors.ink;
+    ctx.font = "15px Rubik, sans-serif";
+    ctx.fillText(zone.twist, WIDTH / 2, HEIGHT / 2 + 28);
+    if (badgesThisRun.includes(zone.badge)) {
+      ctx.fillStyle = colors.coin;
+      ctx.font = "14px Bungee, Impact, sans-serif";
+      ctx.fillText("NEW BADGE: " + zone.badge.toUpperCase(), WIDTH / 2, HEIGHT / 2 + 58);
+      drawBadge(ctx, zone, WIDTH / 2, HEIGHT / 2 + 108, 32, false);
+    }
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+
+  // Scoreboard above the game
+  document.getElementById("coins").textContent = coins;
+  document.getElementById("level").textContent = level;
+  document.getElementById("best").textContent = best;
+}
+
+// Draws a character: a circle (or a ring for Bubble) with two eyes looking down.
+// It's also used for the little previews in the Characters screen.
+function drawCharacter(c, character, x, y, size) {
+  c.fillStyle = character.color;
+  c.strokeStyle = character.color;
+  c.lineWidth = size * 0.28;
+  c.beginPath();
+  c.arc(x, y, character.ring ? size * 0.86 : size, 0, Math.PI * 2);
+  if (character.ring) c.stroke(); else c.fill();
+  c.fillStyle = character.ring ? character.color : colors.shaft;
+  c.beginPath();
+  c.arc(x - size * 0.3, y + size * 0.3, size * 0.17, 0, Math.PI * 2);
+  c.arc(x + size * 0.3, y + size * 0.3, size * 0.17, 0, Math.PI * 2);
+  c.fill();
+}
+
+// Each trail style draws your recent positions differently.
+function drawTrail(c, character) {
+  if (character.trail === "none") return;
+  for (const t of trail) {
+    const fade = 1 - t.age / 0.4;
+    c.globalAlpha = fade * 0.6;
+    c.fillStyle = character.color;
+    c.beginPath();
+    if (character.trail === "fire") {
+      c.fillStyle = fade > 0.5 ? "#ffd166" : character.color;
+      c.arc(t.x + (Math.random() - 0.5) * 6, t.y, DIVER_SIZE * fade * 0.8, 0, Math.PI * 2);
+    } else if (character.trail === "sparkle") {
+      if (Math.random() < 0.5) c.rect(t.x + (Math.random() - 0.5) * 22, t.y, 2.5, 2.5);
+    } else if (character.trail === "bubbles") {
+      c.strokeStyle = character.color;
+      c.lineWidth = 1.5;
+      c.arc(t.x + Math.sin(t.y / 9) * 6, t.y, 2 + fade * 3, 0, Math.PI * 2);
+      c.stroke();
+      continue;
+    } else if (character.trail === "streak") {
+      c.arc(t.x, t.y, DIVER_SIZE * fade, 0, Math.PI * 2);
+    }
+    c.fill();
+  }
+  c.globalAlpha = 1;
+}
+
+function currentCharacter() {
+  return CHARACTERS.find((ch) => ch.id === chosen) || CHARACTERS[0];
+}
+
+// ===== BADGE PICTURES =====
+// Each badge is a round rosette in its zone's color with a little drawing inside.
+// The drawings are made at a size of about 30, then scaled to fit.
+function drawBadge(c, zone, x, y, radius, locked) {
+  c.save();
+  c.translate(x, y);
+  c.scale(radius / 30, radius / 30);
+
+  // Bumpy outer edge, like a rosette
+  c.fillStyle = locked ? colors.rock : zone.ledge;
+  c.beginPath();
+  c.arc(0, 0, 26, 0, Math.PI * 2);
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    c.moveTo(Math.cos(a) * 25 + 5, Math.sin(a) * 25);
+    c.arc(Math.cos(a) * 25, Math.sin(a) * 25, 5, 0, Math.PI * 2);
+  }
+  c.fill();
+  c.fillStyle = zone.shaft;
+  c.beginPath();
+  c.arc(0, 0, 21, 0, Math.PI * 2);
+  c.fill();
+
+  if (locked) {
+    c.fillStyle = colors.muted;
+    c.font = "22px Bungee, Impact, sans-serif";
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    c.fillText("?", 0, 2);
+  } else if (zone.badge === "Canary") {
+    drawCanary(c);
+  } else if (zone.badge === "Crystal Clear") {
+    drawCrystal(c);
+  } else if (zone.badge === "Cool Under Pressure") {
+    drawCoolCube(c);
+  } else if (zone.badge === "Hot Shot") {
+    drawHotShot(c);
+  }
+  c.restore();
+}
+
+// A little dark face: two eyes and a smile.
+function drawFace(c, x, y, spread, color) {
+  c.fillStyle = color;
+  c.beginPath();
+  c.arc(x - spread, y, 1.8, 0, Math.PI * 2);
+  c.arc(x + spread, y, 1.8, 0, Math.PI * 2);
+  c.fill();
+  c.strokeStyle = color;
+  c.lineWidth = 1.4;
+  c.lineCap = "round";
+  c.beginPath();
+  c.arc(x, y + 2, 2.6, 0.2 * Math.PI, 0.8 * Math.PI);
+  c.stroke();
+}
+
+// Canary: a round yellow bird wearing a miner's helmet with a lamp
+function drawCanary(c) {
+  c.fillStyle = "#ffd23f";
+  c.beginPath(); c.arc(0, 4, 11, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "#e8b400";
+  c.beginPath(); c.ellipse(5, 7, 5, 3.5, -0.4, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "#ff8c42";
+  c.beginPath(); c.moveTo(-10, 3); c.lineTo(-16, 5); c.lineTo(-10, 7); c.closePath(); c.fill();
+  c.fillStyle = "#1b1530";
+  c.beginPath(); c.arc(-4, 2, 1.8, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "#e8a33d";
+  c.beginPath(); c.arc(0, -4, 10, Math.PI, 0); c.closePath(); c.fill();
+  c.fillRect(-12, -5, 24, 2.5);
+  c.fillStyle = "#fff6c2";
+  c.beginPath(); c.arc(0, -10, 3, 0, Math.PI * 2); c.fill();
+}
+
+// Crystal Clear: a smiling purple gem with a sparkle
+function drawCrystal(c) {
+  c.fillStyle = "#b58cff";
+  c.beginPath();
+  c.moveTo(0, -15); c.lineTo(10, -4); c.lineTo(5, 14); c.lineTo(-5, 14); c.lineTo(-10, -4);
+  c.closePath(); c.fill();
+  c.fillStyle = "#dccbff";
+  c.beginPath(); c.moveTo(0, -15); c.lineTo(-10, -4); c.lineTo(-3, -4); c.closePath(); c.fill();
+  drawFace(c, 0, 3, 3.5, "#2b1a55");
+  c.fillStyle = "#ffffff";
+  c.beginPath();
+  c.moveTo(12, -16); c.lineTo(13.2, -12.2); c.lineTo(17, -11); c.lineTo(13.2, -9.8);
+  c.lineTo(12, -6); c.lineTo(10.8, -9.8); c.lineTo(7, -11); c.lineTo(10.8, -12.2);
+  c.closePath(); c.fill();
+}
+
+// Cool Under Pressure: an ice cube wearing sunglasses
+function drawCoolCube(c) {
+  c.fillStyle = "#c4ecff";
+  roundedBox(c, -12, -11, 24, 24, 5); c.fill();
+  c.fillStyle = "rgba(255, 255, 255, 0.8)";
+  roundedBox(c, -9, -9, 7, 3, 1.5); c.fill();
+  c.fillStyle = "#1b1530";
+  roundedBox(c, -10, -3, 8.5, 6, 2); c.fill();
+  roundedBox(c, 1.5, -3, 8.5, 6, 2); c.fill();
+  c.fillRect(-2, -2, 4, 1.6);
+  c.strokeStyle = "#1b1530";
+  c.lineWidth = 1.4;
+  c.lineCap = "round";
+  c.beginPath(); c.arc(0, 6, 3, 0.15 * Math.PI, 0.85 * Math.PI); c.stroke();
+}
+
+// Hot Shot: a happy little flame
+function drawHotShot(c) {
+  flameShape(c, 1, 0);
+  c.fillStyle = "#ff6b3d"; c.fill();
+  flameShape(c, 0.6, 5);
+  c.fillStyle = "#ffd166"; c.fill();
+  drawFace(c, 0, 7, 3, "#7a1d0c");
+}
+
+function flameShape(c, size, shiftDown) {
+  c.beginPath();
+  c.moveTo(0, -16 * size + shiftDown);
+  c.bezierCurveTo(5 * size, -8 * size + shiftDown, 12 * size, -4 * size + shiftDown, 11 * size, 4 * size + shiftDown);
+  c.bezierCurveTo(10 * size, 12 * size + shiftDown, 4 * size, 14 * size + shiftDown, 0, 14 * size + shiftDown);
+  c.bezierCurveTo(-4 * size, 14 * size + shiftDown, -10 * size, 12 * size + shiftDown, -11 * size, 4 * size + shiftDown);
+  c.bezierCurveTo(-12 * size, -2 * size + shiftDown, -6 * size, -6 * size + shiftDown, 0, -16 * size + shiftDown);
+  c.closePath();
+}
+
+function roundedBox(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+
+// A small canvas with a badge drawn on it, for the shelf and the game-over screen.
+function badgePicture(zone, size, locked) {
+  const picture = document.createElement("canvas");
+  const ratio = window.devicePixelRatio || 1;
+  picture.width = size * ratio;
+  picture.height = size * ratio;
+  const pc = picture.getContext("2d");
+  pc.scale(ratio, ratio);
+  drawBadge(pc, zone, size / 2, size / 2, size / 2 - 1, locked);
+  return picture;
+}
+
+// ===== START SCREEN =====
+// The little picture at the top: your character falling through a gap, gently bobbing.
+const hero = document.getElementById("heroCanvas");
+const heroCtx = hero.getContext("2d");
+(function sizeHero() {
+  const ratio = window.devicePixelRatio || 1;
+  hero.width = 104 * ratio;
+  hero.height = 104 * ratio;
+  heroCtx.scale(ratio, ratio);
+})();
+
+function drawHero(time) {
+  const c = heroCtx;
+  const zone = ZONES[0];
+  c.clearRect(0, 0, 104, 104);
+  c.fillStyle = zone.shaft;
+  roundedBox(c, 0, 0, 104, 104, 16);
+  c.fill();
+  // Two ledge pieces with a gap, sliding up past you
+  const ledgeY = 104 - ((time / 12) % 140);
+  c.fillStyle = zone.edge;
+  c.fillRect(0, ledgeY + 3, 30, 10);
+  c.fillRect(74, ledgeY + 3, 30, 10);
+  c.fillStyle = zone.ledge;
+  c.fillRect(0, ledgeY, 30, 8);
+  c.fillRect(74, ledgeY, 30, 8);
+  // Your character, with a short trail above
+  const me = currentCharacter();
+  const bob = Math.sin(time / 300) * 3;
+  c.globalAlpha = 0.25;
+  c.fillStyle = me.color;
+  c.beginPath(); c.arc(52, 30 + bob, 9, 0, Math.PI * 2); c.fill();
+  c.globalAlpha = 0.5;
+  c.beginPath(); c.arc(52, 38 + bob, 11, 0, Math.PI * 2); c.fill();
+  c.globalAlpha = 1;
+  drawCharacter(c, me, 52, 48 + bob, 14);
+}
+
+// For returning players: a quick summary of their progress.
+function showReturning() {
+  const line = document.getElementById("returning");
+  line.hidden = best === 0;
+  line.innerHTML = "Best <strong>" + best + "</strong> · Badges <strong>" + badges.length + "/" + ZONES.length +
+    "</strong> · Coins <strong>" + coins + "</strong>";
+}
+
+// Give a zone's badge the first time you reach it.
+function earnBadge(zone) {
+  if (badges.includes(zone.badge)) return;
+  badges.push(zone.badge);
+  badgesThisRun.push(zone.badge);
+  saveText("freefall-badges", JSON.stringify(badges));
+  if (zone === ZONES[0]) addPopup("NEW BADGE: CANARY", "coin");
+}
+
+// ===== 6. THE GAME LOOP =====
+// The browser calls this about 60 times a second.
+let lastTime = 0;
+function loop(time) {
+  const dt = Math.min(0.05, (time - lastTime) / 1000);
+  lastTime = time;
+  if (state === "playing") update(dt);
+  if (state === "start") drawHero(time);
+  if (state === "crashed") updateCrash(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function startGame() {
+  resetGame();
+  badgesThisRun = [];
+  state = "playing";
+  earnBadge(ZONES[0]);
+  leftHeld = rightHeld = false;
+  document.getElementById("startScreen").hidden = true;
+  document.getElementById("gameOverScreen").hidden = true;
+}
+
+function crash() {
+  state = "crashed";
+  crashTime = 0;
+  popups = [];
+  shake = 14;
+  playSound(140, 0.35, "sawtooth", 0.12);
+  // Burst into 18 little pieces flying in every direction.
+  for (let i = 0; i < 18; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const power = 80 + Math.random() * 220;
+    splatBits.push({
+      x: diverX, y: DIVER_Y,
+      vx: Math.cos(angle) * power, vy: Math.sin(angle) * power - 150,
+      r: 2 + Math.random() * 4,
+    });
+  }
+  if (navigator.vibrate) { try { navigator.vibrate(80); } catch (e) {} }
+}
+
+function showGameOver() {
+  const newBest = score > best;
+  if (newBest) { best = score; saveNumber("freefall-best-score", best); }
+  if (ledgesPassed > bestLedges) { bestLedges = ledgesPassed; saveNumber("freefall-best-ledges", bestLedges); }
+
+  // Show any badge you earned for the first time this game.
+  const badgeBox = document.getElementById("medal");
+  const newest = badgesThisRun[badgesThisRun.length - 1];
+  badgeBox.hidden = !newest;
+  if (newest) {
+    const zone = ZONES.find((z) => z.badge === newest);
+    badgeBox.innerHTML = "";
+    badgeBox.append(badgePicture(zone, 40, false), "New badge: " + newest);
+    badgeBox.style.setProperty("--medal", zone.ledge);
+  }
+
+  // How far to the next zone you haven't explored yet
+  const nextZone = ZONES.find((z) => !badges.includes(z.badge));
+  const ledgesToNext = nextZone ? (nextZone.fromLevel - 1) * LEDGES_PER_LEVEL - ledgesPassed : 0;
+  document.getElementById("finalText").innerHTML =
+    "Score <strong>" + score + "</strong> · Best <strong>" + best + "</strong>" +
+    "<br>Reached <strong>" + zoneForLevel(level).name + "</strong>" +
+    (newBest && score > 0 ? "<br>New best!" : "") +
+    (nextZone && ledgesToNext > 0 ? "<br>" + ledgesToNext + " more ledges to discover a new zone." : "") +
+    (coinsThisRun > 0 ? "<br>+" + coinsThisRun + " coins (" + coins + " total)" : "") +
+    nextUnlockText();
+  document.getElementById("shareButton").textContent = "Copy my score";
+  document.getElementById("gameOverScreen").hidden = false;
+}
+
+// "40 more coins for Frost" — always shows the next thing to save up for.
+function nextUnlockText() {
+  const next = CHARACTERS.find((ch) => !owned.includes(ch.id));
+  if (!next) return "";
+  if (coins >= next.price) return "<br><strong>You can unlock " + next.name + "!</strong>";
+  return "<br>" + (next.price - coins) + " more coins for " + next.name + ".";
+}
+
+// ===== CHARACTERS SCREEN =====
+const shop = document.getElementById("shop");
+function openShop() { renderShop(); shop.hidden = false; }
+function closeShop() {
+  shop.hidden = true;
+  showReturning();
+  if (state === "crashed") showGameOver();   // refresh the coin text
+}
+
+function renderShop() {
+  document.getElementById("wallet").textContent = coins + " coins";
+
+  // Badge shelf: earned badges show their name; the rest stay a mystery.
+  const shelf = document.getElementById("badgeShelf");
+  shelf.innerHTML = "";
+  for (const zone of ZONES) {
+    const earned = badges.includes(zone.badge);
+    const item = document.createElement("div");
+    item.className = "badge" + (earned ? "" : " locked");
+    item.style.setProperty("--medal", zone.ledge);
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = earned ? zone.badge : "???";
+    const where = document.createElement("span");
+    where.className = "price";
+    where.textContent = earned ? zone.name : "Reach level " + zone.fromLevel;
+    item.append(badgePicture(zone, 56, !earned), name, where);
+    shelf.append(item);
+  }
+  const cards = document.getElementById("cards");
+  cards.innerHTML = "";
+  for (const ch of CHARACTERS) {
+    const isOwned = owned.includes(ch.id);
+    const card = document.createElement("button");
+    card.className = "card" + (ch.id === chosen ? " selected" : "") + (isOwned ? "" : " locked");
+    card.disabled = !isOwned && coins < ch.price;
+
+    // A small preview of the character
+    const preview = document.createElement("canvas");
+    const ratio = window.devicePixelRatio || 1;
+    preview.width = 48 * ratio; preview.height = 48 * ratio;
+    const pc = preview.getContext("2d");
+    pc.scale(ratio, ratio);
+    drawCharacter(pc, ch, 24, 24, 15);
+
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = ch.name;
+    const price = document.createElement("span");
+    price.className = "price";
+    price.textContent = ch.id === chosen ? "Playing" : isOwned ? "Tap to use" : ch.price + " coins";
+
+    card.append(preview, name, price);
+    card.addEventListener("click", () => pickCharacter(ch));
+    cards.append(card);
+  }
+}
+
+function pickCharacter(ch) {
+  if (!owned.includes(ch.id)) {
+    if (coins < ch.price) return;
+    coins -= ch.price;                 // buy it
+    owned.push(ch.id);
+    saveNumber("freefall-coins", coins);
+    saveText("freefall-owned", JSON.stringify(owned));
+    playSound(784, 0.08); setTimeout(() => playSound(1046, 0.08), 80); setTimeout(() => playSound(1318, 0.15), 160);
+  }
+  chosen = ch.id;
+  saveText("freefall-character", chosen);
+  renderShop();
+}
+
+for (const button of document.querySelectorAll("[data-open-shop]")) button.addEventListener("click", openShop);
+document.getElementById("closeShop").addEventListener("click", closeShop);
+
+// You can start or restart by tapping anywhere, as long as the
+// crash has finished playing out.
+function tryStart() {
+  if (state === "start") startGame();
+  else if (state === "crashed" && crashTime >= RESTART_DELAY) startGame();
+}
+
+// ===== 7. CONTROLS =====
+// Keyboard: arrow keys move you. Space, Enter or an arrow starts a new game.
+document.addEventListener("keydown", (e) => {
+  const isArrow = e.key === "ArrowLeft" || e.key === "ArrowRight";
+  if (isArrow || e.key === " ") e.preventDefault();
+  if (state !== "playing") {
+    if (!shop.hidden) return;
+    if (isArrow || e.key === " " || e.key === "Enter") { e.preventDefault(); tryStart(); }
+    if (state !== "playing") return;
+  }
+  if (e.key === "ArrowLeft") leftHeld = true;
+  if (e.key === "ArrowRight") rightHeld = true;
+});
+document.addEventListener("keyup", (e) => {
+  if (e.key === "ArrowLeft") leftHeld = false;
+  if (e.key === "ArrowRight") rightHeld = false;
+});
+
+// Mouse: hold the left or right half of the game.
+// Finger (phone): touch anywhere and slide; your character follows your finger.
+const stage = document.getElementById("stage");
+const fingers = new Map();
+let fingerX = null;              // where your finger is, in game units (null = not touching)
+let touchMode = false;           // becomes true the first time you play with a finger
+let touchId = null;
+
+function gameXOf(e) {
+  const box = stage.getBoundingClientRect();
+  return (e.clientX - box.left) / box.width * WIDTH;
+}
+function sideOf(e) {
+  const box = stage.getBoundingClientRect();
+  return e.clientX - box.left < box.width / 2 ? "left" : "right";
+}
+function updateFingers() {
+  const sides = [...fingers.values()];
+  leftHeld = sides.includes("left");
+  rightHeld = sides.includes("right");
+}
+stage.addEventListener("pointerdown", (e) => {
+  if (e.target.closest(".ghost, .shop")) return;
+  stage.focus();                        // so the arrow keys reach the game
+  if (e.pointerType !== "mouse") {
+    touchMode = true;
+    if (state !== "playing") tryStart();
+    if (state === "playing") { touchId = e.pointerId; fingerX = gameXOf(e); }
+    return;
+  }
+  if (state !== "playing") { tryStart(); return; }
+  fingers.set(e.pointerId, sideOf(e));
+  updateFingers();
+});
+stage.addEventListener("pointermove", (e) => {
+  if (e.pointerId === touchId) { fingerX = gameXOf(e); return; }
+  if (!fingers.has(e.pointerId)) return;
+  fingers.set(e.pointerId, sideOf(e));
+  updateFingers();
+});
+for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
+  stage.addEventListener(type, (e) => {
+    if (e.pointerId === touchId) { touchId = null; fingerX = null; return; }
+    fingers.delete(e.pointerId);
+    updateFingers();
+  });
+}
+
+// On phones, explain the touch controls instead of the keys.
+try {
+  if (window.matchMedia("(pointer: coarse)").matches) {
+    document.querySelector(".hint").textContent = "Touch anywhere and slide left or right. You follow your finger.";
+  }
+} catch (e) {}
+
+// Copy a bragging message, so you can paste it to friends.
+document.getElementById("shareButton").addEventListener("click", async (e) => {
+  const button = e.currentTarget;
+  const text = "I scored " + score + " and fell all the way to " + zoneForLevel(level).name +
+    " in Freefall. Can you beat me?";
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = "Copied!";
+  } catch (err) {
+    button.textContent = text;
+  }
+});
+
+// Sound on/off
+const soundButton = document.getElementById("soundButton");
+function showSoundSetting() { soundButton.textContent = "Sound: " + (soundOn ? "on" : "off"); }
+soundButton.addEventListener("click", () => {
+  soundOn = !soundOn;
+  if (!soundOn) { silentClip.pause(); silentClipStarted = false; }
+  saveNumber("freefall-sound", soundOn ? 1 : 0);
+  showSoundSetting();
+});
+
+// ===== 8. SETUP =====
+// Make the drawing sharp on high-resolution screens.
+function sizeCanvas() {
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = WIDTH * ratio;
+  canvas.height = HEIGHT * ratio;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+}
+
+// Little beeps, made by the browser itself (no sound files needed).
+let audio = null;
+
+// Phones only allow sound after you touch the screen, and only if the sound
+// is switched on during that touch. So on every tap or key press we make
+// sure the sound system is awake.
+// iPhones on silent mode mute game sounds unless the page also plays a
+// normal audio clip, so we play a tiny silent clip on the first tap.
+const silentClip = new Audio("data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA");
+silentClip.loop = true;
+let silentClipStarted = false;
+
+function wakeUpSound() {
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = "playback";
+    if (!silentClipStarted && soundOn) {
+      silentClipStarted = true;
+      silentClip.play().catch(() => { silentClipStarted = false; });
+    }
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state !== "running") audio.resume();
+    // Play a silent blip, which some phones need before they allow sound
+    const silence = audio.createBuffer(1, 1, 22050);
+    const player = audio.createBufferSource();
+    player.buffer = silence;
+    player.connect(audio.destination);
+    player.start(0);
+  } catch (e) {}
+}
+for (const type of ["pointerdown", "touchend", "keydown", "click"]) {
+  document.addEventListener(type, wakeUpSound, { capture: true });
+}
+function playSound(pitch, seconds, wave = "square", volume = 0.06) {
+  if (!soundOn) return;
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const tone = audio.createOscillator();
+    const loudness = audio.createGain();
+    tone.type = wave;
+    tone.frequency.value = pitch;
+    loudness.gain.setValueAtTime(volume, audio.currentTime);
+    loudness.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + seconds);
+    tone.connect(loudness).connect(audio.destination);
+    tone.start();
+    tone.stop(audio.currentTime + seconds);
+  } catch (e) {}
+}
+
+// Remember your best score and sound setting in this browser.
+function loadNumber(key, fallback) {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved === null ? fallback : Number(saved);
+  } catch (e) { return fallback; }
+}
+function loadText(key, fallback) {
+  try { return localStorage.getItem(key) ?? fallback; } catch (e) { return fallback; }
+}
+function saveText(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) {}
+}
+function loadList(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch (e) { return fallback; }
+}
+function saveNumber(key, value) {
+  try { localStorage.setItem(key, String(value)); } catch (e) {}
+}
+
+readColors();
+sizeCanvas();
+resetGame();
+showSoundSetting();
+showReturning();
+requestAnimationFrame((t) => { lastTime = t; loop(t); });
+document.fonts && document.fonts.ready.then(draw);
+</script>
+</body>
+</html>
