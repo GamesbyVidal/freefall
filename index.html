@@ -146,6 +146,38 @@
   .pulse { animation: pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 50% { transform: scale(1.06); } }
   @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+  .overlay.over { gap: 12px; background: rgba(18, 14, 34, 0.92); overflow-y: auto; justify-content: safe center; }
+  .overlay.over h2 { font-size: 2.2rem; line-height: 1; }
+  .over-where { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.12em; }
+  .final { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .final-score { font-family: var(--display); font-size: 3.4rem; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .best-tag { font-size: 0.8rem; color: var(--muted); }
+  .best-tag.new {
+    font-family: var(--display);
+    color: var(--page);
+    background: var(--coin);
+    padding: 3px 10px;
+    border-radius: 999px;
+    letter-spacing: 0.06em;
+  }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; max-width: 280px; }
+  .stat-box {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 4px;
+    border-radius: 8px;
+    background: var(--shaft);
+  }
+  .stat-box .value { font-size: 1.05rem; }
+  .goals { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 280px; text-align: left; }
+  .goal { display: flex; flex-direction: column; gap: 5px; font-size: 0.82rem; color: var(--muted); }
+  .goal strong { color: var(--ink); font-weight: 600; }
+  .goal.ready strong { color: var(--coin); }
+  .bar { height: 6px; border-radius: 999px; background: var(--rock); overflow: hidden; }
+  .bar span { display: block; height: 100%; border-radius: inherit; background: var(--diver); }
+  .goal.coins .bar span { background: var(--coin); }
+  .button-row { display: flex; gap: 8px; }
   .overlay p { margin: 0; color: var(--muted); line-height: 1.5; max-width: 26ch; }
   .overlay strong { color: var(--ink); }
   button {
@@ -276,13 +308,25 @@
       <button class="ghost" id="closeShop">Back</button>
     </div>
 
-    <div class="overlay" id="gameOverScreen" hidden>
+    <div class="overlay over" id="gameOverScreen" hidden>
+      <p class="over-where" id="overWhere"></p>
       <h2>Splat!</h2>
+      <div class="final">
+        <span class="final-score" id="finalScore">0</span>
+        <span class="best-tag" id="bestTag"></span>
+      </div>
+      <div class="stats">
+        <div class="stat-box"><span class="label">Ledges</span><span class="value" id="statLedges">0</span></div>
+        <div class="stat-box"><span class="label">Depth</span><span class="value" id="statDepth">0 m</span></div>
+        <div class="stat-box"><span class="label">Coins</span><span class="value" id="statCoins">+0</span></div>
+      </div>
       <div class="medal" id="medal" hidden></div>
-      <p id="finalText"></p>
+      <div class="goals" id="goals"></div>
       <button id="restartButton">Tap to fall again</button>
-      <button class="ghost" id="shareButton">Copy my score</button>
-      <button class="ghost" data-open-shop>Characters &amp; badges</button>
+      <div class="button-row">
+        <button class="ghost" id="shareButton">Share score</button>
+        <button class="ghost" data-open-shop>Characters</button>
+      </div>
     </div>
   </div>
 
@@ -1062,6 +1106,7 @@ function loop(time) {
 
 function startGame() {
   resetGame();
+  runSaved = false;
   badgesThisRun = [];
   state = "playing";
   earnBadge(ZONES[0]);
@@ -1089,10 +1134,16 @@ function crash() {
   if (navigator.vibrate) { try { navigator.vibrate(80); } catch (e) {} }
 }
 
+let runSaved = false;             // so your results are only saved once per game
+let wasNewBest = false;
+
 function showGameOver() {
-  const newBest = score > best;
-  if (newBest) { best = score; saveNumber("freefall-best-score", best); }
-  if (ledgesPassed > bestLedges) { bestLedges = ledgesPassed; saveNumber("freefall-best-ledges", bestLedges); }
+  if (!runSaved) {
+    runSaved = true;
+    wasNewBest = score > best && score > 0;
+    if (score > best) { best = score; saveNumber("freefall-best-score", best); }
+    if (ledgesPassed > bestLedges) { bestLedges = ledgesPassed; saveNumber("freefall-best-ledges", bestLedges); }
+  }
 
   // Show any badge you earned for the first time this game.
   const badgeBox = document.getElementById("medal");
@@ -1105,26 +1156,50 @@ function showGameOver() {
     badgeBox.style.setProperty("--medal", zone.ledge);
   }
 
-  // How far to the next zone you haven't explored yet
+  // The headline numbers
+  document.getElementById("overWhere").textContent = zoneForLevel(level).name + " · Level " + level;
+  document.getElementById("finalScore").textContent = score;
+  const bestTag = document.getElementById("bestTag");
+  bestTag.className = "best-tag" + (wasNewBest ? " new" : "");
+  bestTag.textContent = wasNewBest ? "NEW BEST!" : "Best " + best;
+  document.getElementById("statLedges").textContent = ledgesPassed;
+  document.getElementById("statDepth").textContent = Math.floor(distanceFallen / 10) + " m";
+  document.getElementById("statCoins").textContent = "+" + coinsThisRun;
+
+  // Goals with progress bars: the next zone to discover and the next character to unlock
+  const goals = document.getElementById("goals");
+  goals.innerHTML = "";
   const nextZone = ZONES.find((z) => !badges.includes(z.badge));
-  const ledgesToNext = nextZone ? (nextZone.fromLevel - 1) * LEDGES_PER_LEVEL - ledgesPassed : 0;
-  document.getElementById("finalText").innerHTML =
-    "Score <strong>" + score + "</strong> · Best <strong>" + best + "</strong>" +
-    "<br>Reached <strong>" + zoneForLevel(level).name + "</strong>" +
-    (newBest && score > 0 ? "<br>New best!" : "") +
-    (nextZone && ledgesToNext > 0 ? "<br>" + ledgesToNext + " more ledges to discover a new zone." : "") +
-    (coinsThisRun > 0 ? "<br>+" + coinsThisRun + " coins (" + coins + " total)" : "") +
-    nextUnlockText();
-  document.getElementById("shareButton").textContent = "Copy my score";
+  if (nextZone) {
+    const needed = (nextZone.fromLevel - 1) * LEDGES_PER_LEVEL;
+    goals.append(makeGoal("zone", "<strong>New zone</strong> in " + (needed - ledgesPassed) + " more ledges",
+      ledgesPassed / needed, false));
+  }
+  const nextCharacter = CHARACTERS.find((ch) => !owned.includes(ch.id));
+  if (nextCharacter) {
+    const ready = coins >= nextCharacter.price;
+    goals.append(makeGoal("coins", ready
+      ? "<strong>You can unlock " + nextCharacter.name + "!</strong>"
+      : "<strong>" + nextCharacter.name + "</strong>: " + coins + " / " + nextCharacter.price + " coins",
+      coins / nextCharacter.price, ready));
+  }
+  document.getElementById("shareButton").textContent = "Share score";
   document.getElementById("gameOverScreen").hidden = false;
 }
 
-// "40 more coins for Frost" — always shows the next thing to save up for.
-function nextUnlockText() {
-  const next = CHARACTERS.find((ch) => !owned.includes(ch.id));
-  if (!next) return "";
-  if (coins >= next.price) return "<br><strong>You can unlock " + next.name + "!</strong>";
-  return "<br>" + (next.price - coins) + " more coins for " + next.name + ".";
+// One goal line with a progress bar underneath. "progress" goes from 0 to 1.
+function makeGoal(kind, text, progress, ready) {
+  const goal = document.createElement("div");
+  goal.className = "goal " + kind + (ready ? " ready" : "");
+  const words = document.createElement("span");
+  words.innerHTML = text;
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  const fill = document.createElement("span");
+  fill.style.width = Math.round(Math.min(1, Math.max(0, progress)) * 100) + "%";
+  bar.append(fill);
+  goal.append(words, bar);
+  return goal;
 }
 
 // ===== CHARACTERS SCREEN =====
