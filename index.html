@@ -1184,6 +1184,7 @@ function showGameOver() {
       coins / nextCharacter.price, ready));
   }
   document.getElementById("shareButton").textContent = "Share score";
+  makeScoreCard();
   document.getElementById("gameOverScreen").hidden = false;
 }
 
@@ -1357,14 +1358,84 @@ try {
   }
 } catch (e) {}
 
-// Copy a bragging message, so you can paste it to friends.
+// ===== SHARING =====
+// On phones, "Share score" opens the phone's own share menu with a score picture
+// and the game link. Where that isn't possible, it copies a message instead.
+const GAME_LINK = "https://gamesbyvidal.github.io/freefall/";
+let shareFile = null;            // the score picture, made ahead of time so sharing opens instantly
+
+function shareMessage() {
+  return "💥 I scored " + score + " in Freefall and fell " + Math.floor(distanceFallen / 10) +
+    " m into " + zoneForLevel(level).name + "!" + (wasNewBest ? " New personal best." : "") +
+    " Can you beat me? " + GAME_LINK;
+}
+
+// Draws a square score card: your character, your score, where you got to.
+function makeScoreCard() {
+  const size = 600;
+  const card = document.createElement("canvas");
+  card.width = size; card.height = size;
+  const c = card.getContext("2d");
+  const zone = zoneForLevel(level);
+  c.fillStyle = zone.shaft;
+  c.fillRect(0, 0, size, size);
+  c.fillStyle = zone.rock;
+  for (let i = 0; i < 50; i++) {
+    c.beginPath();
+    c.arc((i * 137) % size, (i * 251) % size, 2 + (i % 3), 0, Math.PI * 2);
+    c.fill();
+  }
+  // A ledge with a gap, and your character dropping through it
+  c.fillStyle = zone.edge;
+  c.fillRect(0, 214, 220, 26); c.fillRect(380, 214, 220, 26);
+  c.fillStyle = zone.ledge;
+  c.fillRect(0, 206, 220, 22); c.fillRect(380, 206, 220, 22);
+  drawCharacter(c, currentCharacter(), 300, 150, 44);
+
+  c.textAlign = "center";
+  c.fillStyle = zone.ledge;
+  c.font = "40px Bungee, Impact, sans-serif";
+  c.fillText("FREEFALL", 300, 70);
+  c.fillStyle = colors.ink;
+  c.font = "150px Bungee, Impact, sans-serif";
+  c.fillText(score, 300, 410);
+  c.fillStyle = colors.muted;
+  c.font = "26px Rubik, sans-serif";
+  c.fillText(Math.floor(distanceFallen / 10) + " m deep · " + zone.name, 300, 460);
+  if (wasNewBest) {
+    c.fillStyle = colors.coin;
+    c.font = "24px Bungee, Impact, sans-serif";
+    c.fillText("NEW BEST!", 300, 500);
+  }
+  c.fillStyle = colors.ink;
+  c.font = "24px Rubik, sans-serif";
+  c.fillText("Can you beat me?  gamesbyvidal.github.io/freefall", 300, 565);
+
+  shareFile = null;
+  card.toBlob((blob) => {
+    if (blob) shareFile = new File([blob], "freefall-score.png", { type: "image/png" });
+  }, "image/png");
+}
+
 document.getElementById("shareButton").addEventListener("click", async (e) => {
   const button = e.currentTarget;
-  const text = "I scored " + score + " and fell all the way to " + zoneForLevel(level).name +
-    " in Freefall. Can you beat me?";
+  const text = shareMessage();
+  // 1. The phone's share menu, with the picture if the phone allows it
+  if (navigator.share) {
+    const withPicture = { text: text, files: [shareFile] };
+    const data = shareFile && navigator.canShare && navigator.canShare(withPicture) ? withPicture : { text: text };
+    try {
+      await navigator.share(data);
+      button.textContent = "Shared!";
+      return;
+    } catch (err) {
+      if (err && err.name === "AbortError") return;   // you closed the share menu
+    }
+  }
+  // 2. Otherwise copy the message so you can paste it anywhere
   try {
     await navigator.clipboard.writeText(text);
-    button.textContent = "Copied!";
+    button.textContent = "Copied! Paste it to a friend";
   } catch (err) {
     button.textContent = text;
   }
