@@ -437,11 +437,20 @@ const ZONES = [
     twist: "It's slippery!", badge: "Cool Under Pressure" },
   { name: "Magma Core", emoji: "🟥",    fromLevel: 7, shaft: "#2a0f12", rock: "#46191b", ledge: "#ff6b3d", edge: "#a32c14", moving: 40, ice: true,
     twist: "Sliding gaps AND slippery!", badge: "Hot Shot" },
+  // You fell all the way through the Earth and came out in the sky!
+  { name: "The Other Side", emoji: "☁️", fromLevel: 9, shaft: "#4f86e6", rock: "rgba(255, 255, 255, 0.35)", ledge: "#ffffff", edge: "#c9d8ee", moving: 0, ice: false,
+    wind: true, sky: true, twist: "You fell through the Earth! Watch the wind.", badge: "Globetrotter" },
 ];
 // Each zone also has a badge, earned the first time you reach it.
 // One more badge isn't for a zone: a friend you challenged played and challenged you back.
 const FRIEND_BADGE = { badge: "Partners in Grime", name: "A friend took your challenge", ledge: "#c9a26b", shaft: "#2a1e14" };
 const ICE_GRIP = 8;              // lower = more slippery on ice
+// Wind on The Other Side: every few seconds a gust pushes you sideways.
+// White streaks blow across the screen first, so you know which way it's coming.
+const WIND_EVERY = 3.6;          // seconds from one gust to the next
+const WIND_WARNING = 0.8;        // seconds of streaks before the gust hits
+const WIND_GUST = 1.0;           // how long a gust lasts
+const WIND_PUSH = 90;            // how hard it pushes (you move at 280)
 
 // Daily challenge twists: each day gets the next one in this list, so every
 // day of the week plays a little differently. Leave a number out to keep the normal rule.
@@ -491,6 +500,7 @@ let badgesThisRun = [];
 let diverSpeed = 0;              // your sideways speed (matters on ice)
 let clock = 0;                   // seconds since the game started, for sliding gaps
 let zoneFlash = 0;               // counts down while a new zone's name is shown
+let windClock = 0, windDir = 1;  // where we are in the gust cycle, and which way it blows
 let trail = [];                  // recent positions, for the character's trail
 let owned = loadList("freefall-owned", ["pebble"]);
 let chosen = loadText("freefall-character", "pebble");
@@ -528,6 +538,7 @@ function resetGame() {
   diverSpeed = 0;
   clock = 0;
   zoneFlash = 0;
+  windClock = 0;
   beatBestShown = false;
   level = 1;
   distanceFallen = 0;
@@ -562,6 +573,7 @@ function pickHole(previousHoleX, number) {
   // Zones with sliding gaps or ice need gaps a bit closer together to stay fair.
   const zone = zoneForLedge(number);
   if (zone.ice || twist.ice) reach *= 0.65;
+  if (zone.wind) reach *= 0.85;
   reach = Math.max(20, reach - Math.max(zone.moving, twist.moving || 0));
   if (number <= WARMUP_LEDGES) reach *= 0.45;   // warm-up: easy first jumps
   const min = Math.max(holeWidth / 2, previousHoleX - reach);
@@ -597,6 +609,22 @@ function zoneForLedge(number) {
   return zoneForLevel(1 + Math.floor((number - 1) / LEDGES_PER_LEVEL));
 }
 
+// The wind's push right now: nothing when calm, sideways during a gust.
+function windPush(dt) {
+  if (!zoneForLevel(level).wind) return 0;
+  const before = windClock;
+  windClock = (windClock + dt) % WIND_EVERY;
+  if (windClock < before) windDir = Math.random() < 0.5 ? -1 : 1;   // a new gust: pick a side
+  return windPhase() === "gust" ? windDir * WIND_PUSH : 0;
+}
+
+function windPhase() {
+  const gustStart = WIND_EVERY - WIND_GUST;
+  if (windClock >= gustStart) return "gust";
+  if (windClock >= gustStart - WIND_WARNING) return "warning";
+  return "calm";
+}
+
 function currentSpeed() {
   return START_FALL_SPEED * Math.pow(SPEED_UP_PER_LEVEL, (level || 1) - 1) * (twist.speed || 1);
 }
@@ -621,6 +649,7 @@ function update(dt) {
   if (zoneForLevel(level).ice || twist.ice) diverSpeed += (wanted - diverSpeed) * Math.min(1, ICE_GRIP * dt);
   else diverSpeed = wanted;
   diverX += diverSpeed * dt;
+  diverX += windPush(dt) * dt;
   if (diverX < DIVER_SIZE || diverX > WIDTH - DIVER_SIZE) diverSpeed = 0;   // bump the wall
   diverX = Math.max(DIVER_SIZE, Math.min(WIDTH - DIVER_SIZE, diverX));
 
@@ -799,16 +828,34 @@ function draw() {
   if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
 
   const zone = zoneForLevel(level);
-  ctx.fillStyle = zone.shaft;
+  if (zone.sky) {
+    // Open sky: deep blue up top, warm sunset below
+    const sky = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+    sky.addColorStop(0, "#3a6fd8");
+    sky.addColorStop(0.55, "#7fb8ff");
+    sky.addColorStop(1, "#ffd9a8");
+    ctx.fillStyle = sky;
+  } else {
+    ctx.fillStyle = zone.shaft;
+  }
   ctx.fillRect(-20, -20, WIDTH + 40, HEIGHT + 40);
 
-  // Rock specks
+  // Rock specks (in the sky they're little faraway clouds)
   ctx.fillStyle = zone.rock;
   for (const s of specks) {
     ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    if (zone.sky) {
+      ctx.arc(s.x, s.y, s.r * 4, 0, Math.PI * 2);
+      ctx.arc(s.x + s.r * 5, s.y - s.r, s.r * 5, 0, Math.PI * 2);
+      ctx.arc(s.x + s.r * 10, s.y, s.r * 3.5, 0, Math.PI * 2);
+    } else {
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    }
     ctx.fill();
   }
+
+  // Bursting out of the Earth: the bottom of the Magma Core flies away above you
+  if (zone.sky && zoneFlash > 0) drawCrust(ctx, -90 * (2.5 - zoneFlash));
 
   // Depth markers on the wall every 50 meters (10 pixels = 1 meter)
   ctx.fillStyle = colors.muted;
@@ -827,12 +874,17 @@ function draw() {
     const holeLeft = ledge.holeX - holeWidth / 2;
     const holeRight = ledge.holeX + holeWidth / 2;
     const ledgeZone = zoneForLedge(ledge.number);   // each ledge wears its own zone's colors
+    if (ledgeZone.sky) {
+      drawCloudLedge(ctx, 0, holeLeft, ledge.y);
+      drawCloudLedge(ctx, holeRight, WIDTH, ledge.y);
+    } else {
     ctx.fillStyle = ledgeZone.edge;
     ctx.fillRect(0, ledge.y + 4, holeLeft, LEDGE_THICKNESS);
     ctx.fillRect(holeRight, ledge.y + 4, WIDTH - holeRight, LEDGE_THICKNESS);
     ctx.fillStyle = ledgeZone.ledge;
     ctx.fillRect(0, ledge.y, holeLeft, LEDGE_THICKNESS - 4);
     ctx.fillRect(holeRight, ledge.y, WIDTH - holeRight, LEDGE_THICKNESS - 4);
+    }
 
     // Coin
     if (ledge.coin && !ledge.coin.taken) {
@@ -888,8 +940,17 @@ function draw() {
     }
   } else {
     if (state === "playing") drawTrail(ctx, me);
-    if (state !== "start") drawCharacter(ctx, me, diverX, DIVER_Y, DIVER_SIZE);
+    if (state !== "start") {
+      // A soft shadow so you stand out against the bright sky
+      if (zone.sky) {
+        ctx.fillStyle = "rgba(27, 21, 48, 0.35)";
+        ctx.beginPath(); ctx.arc(diverX, DIVER_Y, DIVER_SIZE + 5, 0, Math.PI * 2); ctx.fill();
+      }
+      drawCharacter(ctx, me, diverX, DIVER_Y, DIVER_SIZE);
+    }
   }
+
+  if (zone.wind && state === "playing" && windPhase() !== "calm") drawWind(ctx);
 
   // Lights Out: darkness everywhere except a pool of light around you,
   // reaching further below you (where the ledges come from) than above.
@@ -904,6 +965,8 @@ function draw() {
 
   // Big score in the middle of the screen while you play
   if (state === "playing") {
+    ctx.save();
+    if (zone.sky) { ctx.shadowColor = "rgba(27, 21, 48, 0.8)"; ctx.shadowBlur = 6; }
     ctx.fillStyle = colors.ink;
     ctx.globalAlpha = 0.9;
     ctx.font = "44px Bungee, Impact, sans-serif";
@@ -924,6 +987,7 @@ function draw() {
       ctx.font = "13px Bungee, Impact, sans-serif";
       ctx.fillText(score > target.score ? "🎯 BEAT IT!" : "🎯 BEAT " + target.score, WIDTH / 2, 118);
     }
+    ctx.restore();
     ctx.globalAlpha = 1;
   }
 
@@ -961,6 +1025,12 @@ function draw() {
   if (zoneFlash > 0) {
     ctx.globalAlpha = Math.min(1, zoneFlash);
     ctx.textAlign = "center";
+    if (zone.sky) {
+      // A dark panel so the words show up against the bright sky
+      ctx.fillStyle = "rgba(27, 21, 48, 0.82)";
+      roundedBox(ctx, 14, HEIGHT / 2 - 62, WIDTH - 28, badgesThisRun.includes(zone.badge) ? 210 : 106, 14);
+      ctx.fill();
+    }
     ctx.fillStyle = zone.ledge;
     ctx.font = "14px Bungee, Impact, sans-serif";
     ctx.fillText("ENTERING", WIDTH / 2, HEIGHT / 2 - 34);
@@ -1192,6 +1262,65 @@ function currentCharacter() {
   return CHARACTERS.find((ch) => ch.id === chosen) || CHARACTERS[0];
 }
 
+// ===== THE OTHER SIDE: SKY PICTURES =====
+// A cloud ledge from left to right: a flat base with puffy bumps on top.
+function drawCloudLedge(c, left, right, y) {
+  if (right - left < 2) return;
+  c.fillStyle = "#c9d8ee";
+  roundedBox(c, left - 10, y + 4, right - left + 10, LEDGE_THICKNESS - 2, 7); c.fill();
+  c.fillStyle = "#ffffff";
+  roundedBox(c, left - 10, y + 1, right - left + 10, LEDGE_THICKNESS - 5, 6); c.fill();
+  c.beginPath();
+  for (let x = left + 9; x < right - 4; x += 17) {
+    c.moveTo(x + 9, y + 3);
+    c.arc(x, y + 3 - (Math.floor(x / 17) % 2) * 2, 9, 0, Math.PI * 2);
+  }
+  c.fill();
+}
+
+// The jagged bottom of the Magma Core, glowing at the edge
+function drawCrust(c, offset) {
+  const points = [[360, 58], [320, 70], [290, 52], [250, 78], [205, 62], [170, 88], [130, 64], [95, 80], [55, 58], [20, 72], [0, 60]];
+  c.save();
+  c.translate(0, offset);
+  c.fillStyle = "#46191b";
+  c.beginPath();
+  c.moveTo(0, -40);
+  c.lineTo(WIDTH, -40);
+  for (const [x, y] of points) c.lineTo(x * WIDTH / 360, y);
+  c.closePath();
+  c.fill();
+  c.strokeStyle = "#ff6b3d";
+  c.lineWidth = 4;
+  c.beginPath();
+  points.forEach(([x, y], i) => i ? c.lineTo(x * WIDTH / 360, y) : c.moveTo(x * WIDTH / 360, y));
+  c.stroke();
+  c.restore();
+}
+
+// White streaks blowing across the screen: a warning, then the gust itself
+function drawWind(c) {
+  const gust = windPhase() === "gust";
+  c.save();
+  c.strokeStyle = "rgba(255, 255, 255, " + (gust ? 0.95 : 0.7) + ")";
+  c.shadowColor = "rgba(27, 21, 48, 0.5)";
+  c.shadowBlur = 3;
+  c.lineWidth = gust ? 4 : 2.5;
+  c.lineCap = "round";
+  const travel = (clock * 420) % (WIDTH + 160);
+  for (let i = 0; i < 11; i++) {
+    const length = 60 + (i % 3) * 22;
+    let x = (travel + i * 61) % (WIDTH + 160) - 80;
+    if (windDir < 0) x = WIDTH - x;
+    const y = 130 + ((i * 89) % (HEIGHT - 180));
+    c.beginPath();
+    c.moveTo(x, y);
+    c.quadraticCurveTo(x - windDir * length * 0.4, y - 6, x - windDir * length, y);
+    c.stroke();
+  }
+  c.restore();
+}
+
 // ===== BADGE PICTURES =====
 // Each badge is a round rosette in its zone's color with a little drawing inside.
 // The drawings are made at a size of about 30, then scaled to fit.
@@ -1229,6 +1358,8 @@ function drawBadge(c, zone, x, y, radius, locked) {
     drawCoolCube(c);
   } else if (zone.badge === "Hot Shot") {
     drawHotShot(c);
+  } else if (zone.badge === "Globetrotter") {
+    drawGlobe(c);
   } else if (zone.badge === FRIEND_BADGE.badge) {
     drawFriends(c);
   }
@@ -1342,6 +1473,39 @@ function drawCoolCube(c) {
   c.lineWidth = 1.4;
   c.lineCap = "round";
   c.beginPath(); c.arc(0, 6, 3, 0.15 * Math.PI, 0.85 * Math.PI); c.stroke();
+}
+
+// Globetrotter: the Earth, with a little faller popping out the bottom
+function drawGlobe(c) {
+  c.save();
+  c.beginPath();
+  c.arc(0, 3, 14, 0, Math.PI * 2);
+  c.clip();
+  c.fillStyle = "#3d8bfd";
+  c.fillRect(-15, -12, 30, 30);
+  c.fillStyle = "#4cc38a";
+  c.beginPath(); c.ellipse(-5, -1, 6, 4, 0.5, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(6, 8, 5, 3.5, -0.4, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(8, -5, 3, 2, 0, 0, Math.PI * 2); c.fill();
+  c.restore();
+  // The path you fell, straight through
+  c.strokeStyle = "#fff6c2";
+  c.lineWidth = 1.4;
+  c.setLineDash([2, 2]);
+  c.beginPath(); c.moveTo(0, -14); c.lineTo(0, 11); c.stroke();
+  c.setLineDash([]);
+  c.fillStyle = "#ff7a3c";
+  c.beginPath(); c.arc(0, 17, 5, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "#1b1530";
+  c.beginPath(); c.arc(-1.8, 17.5, 0.9, 0, Math.PI * 2); c.arc(1.8, 17.5, 0.9, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "#ffffff";
+  c.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4;
+    const r = i % 2 ? 1.2 : 3.6;
+    c.lineTo(13 + Math.cos(a) * r, -12 + Math.sin(a) * r);
+  }
+  c.fill();
 }
 
 // Hot Shot: a happy little flame
@@ -1612,6 +1776,11 @@ try {
   const d = parseInt(params.get("d"), 10);
   if (c >= 0 && d > 0) challenge = { score: c, day: d, reply: params.get("r") === "1" };
 } catch (e) {}
+// Opening your own challenge link isn't a challenge: ignore it and tidy the address.
+if (challenge && isMyOwnChallenge(challenge)) {
+  challenge = null;
+  try { history.replaceState(null, "", location.pathname); } catch (e) {}
+}
 let friendBadgeNow = false;
 if (challenge) {
   saveNumber("freefall-was-challenged", 1);
@@ -1621,6 +1790,20 @@ if (challenge) {
     saveText("freefall-badges", JSON.stringify(badges));
     friendBadgeNow = true;
   }
+}
+
+// Your own link: one this device sent, or today's link with exactly your best score
+function isMyOwnChallenge(ch) {
+  const sent = loadList("freefall-sent-links", []);
+  if (sent.includes(ch.score + "-" + ch.day)) return true;
+  return ch.day === todayNumber() && ch.score === dailyBest() && loadNumber("freefall-challenges-sent", 0) > 0;
+}
+
+// Remember the challenges this device sends (just the last few)
+function rememberSentChallenge() {
+  const sent = loadList("freefall-sent-links", []);
+  sent.push(dailyBest() + "-" + todayNumber());
+  saveText("freefall-sent-links", JSON.stringify(sent.slice(-10)));
 }
 
 // Only counts if it's for today's daily (yesterday's ledges were different)
@@ -1861,7 +2044,7 @@ function renderShop() {
     const earned = badges.includes(zone.badge);
     const item = document.createElement("div");
     item.className = "badge" + (earned ? "" : " locked");
-    if (zone === FRIEND_BADGE) item.style.gridColumn = "1 / -1";
+    if (zone === FRIEND_BADGE && ZONES.length % 2 === 0) item.style.gridColumn = "1 / -1";
     item.style.setProperty("--medal", zone.ledge);
     const name = document.createElement("span");
     name.className = "name";
@@ -1869,7 +2052,7 @@ function renderShop() {
     const where = document.createElement("span");
     where.className = "price";
     where.textContent = earned ? zone.name : zone === FRIEND_BADGE
-      ? "Challenge a friend to the daily. Earn it when they challenge you back."
+      ? "Challenge a friend. Earn it when they challenge you back."
       : "Reach level " + zone.fromLevel;
     item.append(badgePicture(zone, 56, !earned), name, where);
     shelf.append(item);
@@ -2123,13 +2306,17 @@ function makeScoreCard() {
 
 document.getElementById("shareButton").addEventListener("click", (e) => {
   track(dailyMode ? "challenge-sent" : "share", dailyMode ? "Sent a daily challenge" : "Pressed Share score");
-  if (dailyMode) saveNumber("freefall-challenges-sent", loadNumber("freefall-challenges-sent", 0) + 1);
+  if (dailyMode) {
+    saveNumber("freefall-challenges-sent", loadNumber("freefall-challenges-sent", 0) + 1);
+    rememberSentChallenge();
+  }
   shareText(e.currentTarget, shareMessage(), shareFile);
 });
 // The menu's "Challenge a friend" button, once you've played today's daily
 document.getElementById("challengeButton").addEventListener("click", (e) => {
   track("challenge-sent", "Sent a daily challenge");
   saveNumber("freefall-challenges-sent", loadNumber("freefall-challenges-sent", 0) + 1);
+  rememberSentChallenge();
   shareText(e.currentTarget, dailyChallengeMessage(), null);
 });
 
