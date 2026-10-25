@@ -350,6 +350,7 @@ const LEDGES_PER_LEVEL = 15;     // pass this many ledges to reach the next leve
 const SIDE_SPEED = 280;          // how fast you move left and right
 const LEDGE_GAP = 170;           // vertical space between one ledge and the next
 const HOLE_WIDTH = 80;           // how wide the gap in each ledge is
+const WARMUP_LEDGES = 5;         // the first few gaps sit closer together while new players learn
 const GAP_SPREAD = 0.85;         // how far apart gaps can be (1 = only just reachable, lower = easier)
 const LEDGE_THICKNESS = 16;
 const DIVER_SIZE = 13;           // radius of your character
@@ -470,6 +471,7 @@ function pickHole(previousHoleX, number) {
   const zone = zoneForLedge(number);
   if (zone.ice) reach *= 0.75;
   reach = Math.max(20, reach - zone.moving);
+  if (number <= WARMUP_LEDGES) reach *= 0.45;   // warm-up: easy first jumps
   const min = Math.max(HOLE_WIDTH / 2, previousHoleX - reach);
   const max = Math.min(WIDTH - HOLE_WIDTH / 2, previousHoleX + reach);
   return min + levelRandom() * (max - min);
@@ -481,7 +483,7 @@ function makeLedge(y, holeX, number, previousHoleX) {
   // Some gaps get a coin, placed off-center so grabbing it is a choice.
   // It goes on the side you're coming from, so it's always reachable.
   let coin = null;
-  if (number > 1 && levelRandom() < COIN_CHANCE) {
+  if (number === 2 || (number > 1 && levelRandom() < COIN_CHANCE)) {   // ledge 2 always has a coin
     const side = previousHoleX < holeX ? -1 : 1;
     const room = HOLE_WIDTH / 2 - COIN_SIZE - 4;
     coin = { offset: side * (room * (0.5 + levelRandom() * 0.5)), taken: false };
@@ -818,6 +820,16 @@ function draw() {
     ctx.globalAlpha = 1;
   }
 
+  // First game ever: a short hint about the controls
+  if (state === "playing" && firstGame && clock < 3.5) {
+    ctx.globalAlpha = Math.min(1, (3.5 - clock) * 2);
+    ctx.fillStyle = colors.ink;
+    ctx.textAlign = "center";
+    ctx.font = "18px Bungee, Impact, sans-serif";
+    ctx.fillText(onPhone ? "SLIDE YOUR FINGER TO STEER" : "← → TO MOVE", WIDTH / 2, DIVER_Y + 110);
+    ctx.globalAlpha = 1;
+  }
+
   // New zone message
   if (zoneFlash > 0) {
     ctx.globalAlpha = Math.min(1, zoneFlash);
@@ -1142,7 +1154,13 @@ function dailyBest() {
   return loadNumber("freefall-daily-" + todayNumber(), 0);
 }
 
+let firstGame = loadNumber("freefall-played", 0) === 0;
+let onPhone = false;
+try { onPhone = window.matchMedia("(pointer: coarse)").matches; } catch (e) {}
+
 function startGame(daily = dailyMode) {
+  if (loadNumber("freefall-played", 0) === 0) saveNumber("freefall-played", 1);
+  else firstGame = false;
   dailyMode = daily;
   dailyRandom = makeSeededRandom(todayNumber() * 7919);
   resetGame();
