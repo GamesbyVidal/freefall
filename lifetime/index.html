@@ -26,6 +26,7 @@
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%}
+html{background:#3b2f70}
 body{
   font-family:'Fredoka',system-ui,sans-serif;color:var(--ink);
   background:linear-gradient(170deg,var(--bg1),var(--bg2));background-attachment:fixed;
@@ -140,7 +141,7 @@ const SETTINGS = {
   greatIfUnder: 0.5,       // under half your goal = an amazing year
   mehIfOver: 1.25,         // up to 25% over your goal = a so-so year
   awfulIfOver: 2,          // more than double your goal = a disaster year
-  streakBonuses: {3: 3, 7: 5, 14: 8, 30: 12}  // streak length: bonus points to every stat
+  streakBonuses: {3: 2, 7: 4, 14: 6, 30: 10}  // streak length: bonus points to every stat
 };
 
 // ============ LIFE EVENTS ============
@@ -328,7 +329,7 @@ function checkIn(mins){
   const ev = pick(fresh);
   S.used.push(ev[1]);
 
-  const mult = {great:1.5, good:1, meh:0.5, bad:1, awful:1.5}[tier];
+  const mult = {great:1.5, good:1, meh:0.75, bad:1.5, awful:2}[tier];
   const fx = {};
   for (const k in ev[2]) fx[k] = Math.round(ev[2][k] * mult);
   if (S.age > 60) fx.h = (fx.h || 0) - 1; // getting older
@@ -346,15 +347,15 @@ function checkIn(mins){
     if (S.streak >= 3) notes.push('💔 Your '+S.streak+' day streak ended.');
     S.streak = 0;
   }
-  applyFx(fx);
+  const shown = applyFx(fx);
 
   let earned = 0;
-  if (S.pay > 0) { earned = Math.round(S.pay * (met ? 1 : 0.6)); S.money += earned; }
+  if (S.pay > 0) { earned = Math.round(S.pay * (met ? 0.3 : 0.1)); S.money += earned; } // what they manage to save
 
   const ms = milestone(S.age);
   if (ms && ms.fx) applyFx(ms.fx);
 
-  const entry = {age:S.age, date:today(), mins, goal:g, tier, emoji:ev[0], text:ev[1], fx, earned, notes, ms: ms ? {emoji:ms.emoji, title:ms.title, text:ms.text} : null};
+  const entry = {age:S.age, date:today(), mins, goal:g, tier, emoji:ev[0], text:ev[1], fx: shown, earned, notes, ms: ms ? {emoji:ms.emoji, title:ms.title, text:ms.text} : null};
   S.log.push(entry);
   S.lastDate = today();
   if (S.age >= SETTINGS.lifeLength) S.done = true;
@@ -363,7 +364,18 @@ function checkIn(mins){
   showYear(entry);
 }
 
-function applyFx(fx){ for (const k in fx) S[k] = clamp(S[k] + fx[k]); }
+// Gains shrink as a stat nears 100, so it takes steady good days to stay on top.
+function applyFx(fx){
+  const real = {};
+  for (const k in fx) {
+    let v = fx[k];
+    if (v > 0 && k !== 'money') v = Math.max(1, Math.round(v * Math.min(1, (100 - S[k]) / 50)));
+    const before = S[k];
+    S[k] = clamp(S[k] + v);
+    real[k] = S[k] - before;
+  }
+  return real;
+}
 
 // ============ BIG LIFE MOMENTS ============
 function milestone(age){
@@ -424,8 +436,8 @@ function milestone(age){
     : {emoji:'🏍️', title:'Midlife crisis', text:'Bought a motorcycle. Can\'t ride it. It lives in the garage now.', fx:{j:-4}};
 
   if (age === 65) {
-    if (S.money >= 3000) { S.job = 'Retired'; S.pay = 0; return {emoji:'🏝️', title:'Retired in style', text:'Retired to a beach house in Hawaii. Wears flip flops full time.', fx:{j:12}}; }
-    if (S.money >= 1000) { S.job = 'Retired'; S.pay = 0; return {emoji:'🌻', title:'Happy retirement', text:'Retired comfortably with a big garden and a porch swing.', fx:{j:8}}; }
+    if (S.money >= 2000) { S.job = 'Retired'; S.pay = 0; return {emoji:'🏝️', title:'Retired in style', text:'Retired to a beach house in Hawaii. Wears flip flops full time.', fx:{j:12}}; }
+    if (S.money >= 700) { S.job = 'Retired'; S.pay = 0; return {emoji:'🌻', title:'Happy retirement', text:'Retired comfortably with a big garden and a porch swing.', fx:{j:8}}; }
     S.job = 'Mega-Mart greeter'; S.pay = 25;
     return {emoji:'🛒', title:'Can\'t afford to retire', text:'Didn\'t save enough. Now a greeter at Mega-Mart. Waves a lot.', fx:{j:-6}};
   }
@@ -557,7 +569,7 @@ function fxHTML(fx, earned){
   const names = {h:'💪', s:'🧠', j:'😊'};
   let out = '';
   for (const k of ['h','s','j']) if (fx[k]) out += '<span class="'+(fx[k]<0?'neg':'')+'">'+(fx[k]>0?'+':'')+fx[k]+' '+names[k]+'</span>';
-  if (earned) out += '<span>+'+fmtMoney(earned)+' 💰</span>';
+  if (earned) out += '<span>+'+fmtMoney(earned)+' saved 💰</span>';
   return out;
 }
 
