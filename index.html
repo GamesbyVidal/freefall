@@ -744,7 +744,7 @@ function passLedge(ledge) {
     levelFlash = 1.5;
     if (zoneForLevel(level) !== zoneForLevel(level - 1)) {
       levelFlash = 0;
-      zoneFlash = 2.5;
+      zoneFlash = 2;
       earnBadge(zoneForLevel(level));
       playSound(392, 0.12); setTimeout(() => playSound(523, 0.12), 120); setTimeout(() => playSound(659, 0.25), 240);
     }
@@ -855,7 +855,7 @@ function draw() {
   }
 
   // Bursting out of the Earth: the bottom of the Magma Core flies away above you
-  if (zone.sky && zoneFlash > 0) drawCrust(ctx, -90 * (2.5 - zoneFlash));
+  if (zone.sky && zoneFlash > 0) drawCrust(ctx, -110 * (2 - zoneFlash));
 
   // Depth markers on the wall every 50 meters (10 pixels = 1 meter)
   ctx.fillStyle = colors.muted;
@@ -963,8 +963,8 @@ function draw() {
     ctx.fillRect(-20, -20, WIDTH + 40, HEIGHT + 40);
   }
 
-  // Big score in the middle of the screen while you play
-  if (state === "playing") {
+  // Big score near the top while you play (a new zone's banner takes its place for a moment)
+  if (state === "playing" && zoneFlash <= 0) {
     ctx.save();
     if (zone.sky) { ctx.shadowColor = "rgba(27, 21, 48, 0.8)"; ctx.shadowBlur = 6; }
     ctx.fillStyle = colors.ink;
@@ -981,7 +981,7 @@ function draw() {
       ctx.fillText(streakText, WIDTH / 2, 96);
     }
     // The score to beat, when a friend challenged you to today's daily
-    const target = dailyMode && challengeToday();
+    const target = dailyMode && levelFlash <= 0 && challengeToday();
     if (target) {
       ctx.fillStyle = colors.coin;
       ctx.font = "13px Bungee, Impact, sans-serif";
@@ -1002,13 +1002,16 @@ function draw() {
   ctx.globalAlpha = 1;
 
   // "LEVEL 2!" message
+  // Shown just above you, so it never hides the ledges coming up from below
   if (levelFlash > 0) {
+    ctx.save();
     ctx.globalAlpha = Math.min(1, levelFlash);
+    if (zone.sky) { ctx.shadowColor = "rgba(27, 21, 48, 0.8)"; ctx.shadowBlur = 6; }
     ctx.fillStyle = colors.ink;
-    ctx.font = "28px Bungee, Impact, sans-serif";
+    ctx.font = "22px Bungee, Impact, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("LEVEL " + level + "!", WIDTH / 2, HEIGHT / 2);
-    ctx.globalAlpha = 1;
+    ctx.fillText("LEVEL " + level + "!", WIDTH / 2, 126);
+    ctx.restore();
   }
 
   // First game ever: a short hint about the controls
@@ -1021,31 +1024,36 @@ function draw() {
     ctx.globalAlpha = 1;
   }
 
-  // New zone message
+  // New zone message: a see-through strip at the top, above you, out of the way
+  // of the ledges coming up from below. It sits where the score usually is.
   if (zoneFlash > 0) {
-    ctx.globalAlpha = Math.min(1, zoneFlash);
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, zoneFlash * 1.5);
+    const newBadge = badgesThisRun.includes(zone.badge);
+    ctx.fillStyle = "rgba(27, 21, 48, 0.6)";
+    roundedBox(ctx, 12, 8, WIDTH - 24, newBadge ? 112 : 84, 12);
+    ctx.fill();
     ctx.textAlign = "center";
-    if (zone.sky) {
-      // A dark panel so the words show up against the bright sky
-      ctx.fillStyle = "rgba(27, 21, 48, 0.82)";
-      roundedBox(ctx, 14, HEIGHT / 2 - 62, WIDTH - 28, badgesThisRun.includes(zone.badge) ? 210 : 106, 14);
-      ctx.fill();
-    }
     ctx.fillStyle = zone.ledge;
-    ctx.font = "14px Bungee, Impact, sans-serif";
-    ctx.fillText("ENTERING", WIDTH / 2, HEIGHT / 2 - 34);
-    ctx.font = "30px Bungee, Impact, sans-serif";
-    ctx.fillText(zone.name.toUpperCase(), WIDTH / 2, HEIGHT / 2);
+    ctx.font = "11px Bungee, Impact, sans-serif";
+    ctx.fillText("ENTERING", WIDTH / 2, 26);
+    ctx.font = "22px Bungee, Impact, sans-serif";
+    ctx.fillText(zone.name.toUpperCase(), WIDTH / 2, 50);
     ctx.fillStyle = colors.ink;
-    ctx.font = "15px Rubik, sans-serif";
-    ctx.fillText(zone.twist, WIDTH / 2, HEIGHT / 2 + 28);
-    if (badgesThisRun.includes(zone.badge)) {
+    ctx.font = "13px Rubik, sans-serif";
+    ctx.fillText(zone.twist, WIDTH / 2, 72);
+    if (newBadge) {
+      // A small badge picture next to its name
+      const words = "NEW BADGE: " + zone.badge.toUpperCase();
+      ctx.font = "12px Bungee, Impact, sans-serif";
+      const wordsWidth = ctx.measureText(words).width;
+      const left = WIDTH / 2 - (wordsWidth + 30) / 2;
+      drawBadge(ctx, zone, left + 11, 98, 11, false);
       ctx.fillStyle = colors.coin;
-      ctx.font = "14px Bungee, Impact, sans-serif";
-      ctx.fillText("NEW BADGE: " + zone.badge.toUpperCase(), WIDTH / 2, HEIGHT / 2 + 58);
-      drawBadge(ctx, zone, WIDTH / 2, HEIGHT / 2 + 108, 32, false);
+      ctx.textAlign = "left";
+      ctx.fillText(words, left + 30, 103);
     }
-    ctx.globalAlpha = 1;
+    ctx.restore();
   }
   ctx.restore();
 
