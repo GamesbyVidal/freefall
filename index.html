@@ -188,6 +188,8 @@
   .button-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
   button.daily { border-color: var(--coin); color: var(--coin); }
   .small-buttons button { padding: 10px 14px; font-size: 0.9rem; white-space: nowrap; }
+  .overlay p.daily-note { font-size: 0.8rem; max-width: 30ch; margin-top: -4px; }
+  .goal.streak .bar span { background: #ff7a45; }
   .new-tag {
     display: inline-block;
     margin-left: 6px;
@@ -313,6 +315,7 @@
         <button class="ghost daily" id="dailyButton">Daily challenge</button>
         <button class="ghost" data-open-shop>Characters</button>
       </div>
+      <p class="daily-note" id="dailyNote"></p>
       <ul class="tips" id="tips">
         <li><span class="tip-icon ledge"></span>Slip through the gaps. Touch a ledge and it's over.</li>
         <li><span class="tip-icon glow"></span>Hit the glowing middle in a row for x2 and x3.</li>
@@ -395,17 +398,34 @@ const RESTART_DELAY = 0.6;       // seconds after a crash before you can restart
 //   moving: how far (in pixels) gaps slide side to side. 0 = they stay still.
 //   ice:    true = you slide, so you need to start and stop early.
 const ZONES = [
-  { name: "The Mine Shaft", fromLevel: 1, shaft: "#1b1530", rock: "#2a2148", ledge: "#e8a33d", edge: "#9c5a1c", moving: 0,  ice: false,
+  { name: "The Mine Shaft", emoji: "🟧", fromLevel: 1, shaft: "#1b1530", rock: "#2a2148", ledge: "#e8a33d", edge: "#9c5a1c", moving: 0,  ice: false,
     twist: "", badge: "Canary" },
-  { name: "Crystal Caves", fromLevel: 3, shaft: "#131a35", rock: "#25305e", ledge: "#b58cff", edge: "#6a45b8", moving: 28, ice: false,
+  { name: "Crystal Caves", emoji: "🟪", fromLevel: 3, shaft: "#131a35", rock: "#25305e", ledge: "#b58cff", edge: "#6a45b8", moving: 28, ice: false,
     twist: "Gaps slide!", badge: "Crystal Clear" },
-  { name: "Ice Cavern",    fromLevel: 5, shaft: "#0e2230", rock: "#1d3b4f", ledge: "#c4ecff", edge: "#5d9cc0", moving: 0,  ice: true,
+  { name: "Ice Cavern", emoji: "🟦",    fromLevel: 5, shaft: "#0e2230", rock: "#1d3b4f", ledge: "#c4ecff", edge: "#5d9cc0", moving: 0,  ice: true,
     twist: "It's slippery!", badge: "Cool Under Pressure" },
-  { name: "Magma Core",    fromLevel: 7, shaft: "#2a0f12", rock: "#46191b", ledge: "#ff6b3d", edge: "#a32c14", moving: 40, ice: true,
+  { name: "Magma Core", emoji: "🟥",    fromLevel: 7, shaft: "#2a0f12", rock: "#46191b", ledge: "#ff6b3d", edge: "#a32c14", moving: 40, ice: true,
     twist: "Sliding gaps AND slippery!", badge: "Hot Shot" },
 ];
 // Each zone also has a badge, earned the first time you reach it.
 const ICE_GRIP = 8;              // lower = more slippery on ice
+
+// Daily challenge twists: each day gets the next one in this list, so every
+// day of the week plays a little differently. Leave a number out to keep the normal rule.
+//   holeWidth: gap size   coinChance: share of gaps with a coin   ice: slippery everywhere
+//   moving: every gap slides at least this much   speed: 1.25 = 25% faster   coinValue: coins worth more
+const TWISTS = [
+  { name: "Classic",    about: "No tricks, just ledges." },
+  { name: "Tiny Gaps",  about: "The gaps are narrower.", holeWidth: 68 },
+  { name: "Coin Rush",  about: "Coins in almost every gap.", coinChance: 0.9 },
+  { name: "All Ice",    about: "Slippery from the very first ledge.", ice: true },
+  { name: "Wobbly",     about: "Every gap slides.", moving: 24 },
+  { name: "Big & Fast", about: "Wider gaps, but 25% faster.", holeWidth: 96, speed: 1.25 },
+  { name: "Lucky Day",  about: "Every coin is worth 2.", coinValue: 2 },
+];
+const NO_TWIST = { name: "", about: "" };
+const DAILY_BONUS = 10;          // coins for your first daily game each day
+const STREAK_CHARACTER_DAYS = 7; // daily streak needed for the special character
 
 // Characters you can unlock with coins. "trail" is what follows you as you fall.
 const CHARACTERS = [
@@ -415,6 +435,8 @@ const CHARACTERS = [
   { id: "bubble", name: "Bubble", price: 120, color: "#9fd9ff", trail: "bubbles", ring: true },
   { id: "goldie", name: "Goldie", price: 250, color: "#f5d04a", trail: "sparkle" },
   { id: "comet",  name: "Comet",  price: 500, color: "#ffffff", trail: "streak" },
+  // Can't be bought: play the daily challenge 7 days in a row
+  { id: "blaze",  name: "Blaze",  price: 0, streak: true, color: "#ff4fa3", trail: "fire" },
 ];
 
 // ===== 2. GAME STATE =====
@@ -442,12 +464,19 @@ let splatBits = [];              // little pieces that fly out when you crash
 let best = loadNumber("freefall-best-score", 0);
 let bestLedges = loadNumber("freefall-best-ledges", 0);   // where the "YOUR BEST" line goes
 let soundOn = loadNumber("freefall-sound", 1) === 1;
+let twist = NO_TWIST;            // today's daily twist (none in normal games)
+let holeWidth = HOLE_WIDTH;      // gap size for this game (a twist can change it)
+let dailyStreak = loadNumber("freefall-daily-streak", 0);   // daily challenges played in a row
+let dailyBonusNow = 0;           // daily bonus coins given this game
+let blazeUnlockedNow = false;
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
 // ===== 3. STARTING A NEW GAME =====
 function resetGame() {
+  twist = dailyMode ? todayTwist() : NO_TWIST;
+  holeWidth = twist.holeWidth || HOLE_WIDTH;
   diverX = WIDTH / 2;
   score = 0;
   ledgesPassed = 0;
@@ -491,11 +520,11 @@ function pickHole(previousHoleX, number) {
   let reach = SIDE_SPEED * timeToReach * GAP_SPREAD;
   // Zones with sliding gaps or ice need gaps a bit closer together to stay fair.
   const zone = zoneForLedge(number);
-  if (zone.ice) reach *= 0.65;
-  reach = Math.max(20, reach - zone.moving);
+  if (zone.ice || twist.ice) reach *= 0.65;
+  reach = Math.max(20, reach - Math.max(zone.moving, twist.moving || 0));
   if (number <= WARMUP_LEDGES) reach *= 0.45;   // warm-up: easy first jumps
-  const min = Math.max(HOLE_WIDTH / 2, previousHoleX - reach);
-  const max = Math.min(WIDTH - HOLE_WIDTH / 2, previousHoleX + reach);
+  const min = Math.max(holeWidth / 2, previousHoleX - reach);
+  const max = Math.min(WIDTH - holeWidth / 2, previousHoleX + reach);
   return min + levelRandom() * (max - min);
 }
 
@@ -505,14 +534,14 @@ function makeLedge(y, holeX, number, previousHoleX) {
   // Some gaps get a coin, placed off-center so grabbing it is a choice.
   // It goes on the side you're coming from, so it's always reachable.
   let coin = null;
-  if (number === 2 || (number > 1 && levelRandom() < COIN_CHANCE)) {   // ledge 2 always has a coin
+  if (number === 2 || (number > 1 && levelRandom() < (twist.coinChance || COIN_CHANCE))) {   // ledge 2 always has a coin
     const side = previousHoleX < holeX ? -1 : 1;
-    const room = HOLE_WIDTH / 2 - COIN_SIZE - 4;
+    const room = holeWidth / 2 - COIN_SIZE - 4;
     coin = { offset: side * (room * (0.5 + levelRandom() * 0.5)), taken: false };
   }
   // In zones with sliding gaps, each gap gets its own starting point in the slide.
   const zone = zoneForLedge(number);
-  return { y: y, holeX: holeX, homeX: holeX, slide: zone.moving, phase: levelRandom() * Math.PI * 2,
+  return { y: y, holeX: holeX, homeX: holeX, slide: Math.max(zone.moving, twist.moving || 0), phase: levelRandom() * Math.PI * 2,
            number: number, passed: false, closest: Infinity, centerMiss: Infinity, coin: coin };
 }
 
@@ -528,7 +557,7 @@ function zoneForLedge(number) {
 }
 
 function currentSpeed() {
-  return START_FALL_SPEED * Math.pow(SPEED_UP_PER_LEVEL, (level || 1) - 1);
+  return START_FALL_SPEED * Math.pow(SPEED_UP_PER_LEVEL, (level || 1) - 1) * (twist.speed || 1);
 }
 
 // ===== 4. UPDATING THE GAME EACH FRAME =====
@@ -548,7 +577,7 @@ function update(dt) {
     const direction = (rightHeld ? 1 : 0) - (leftHeld ? 1 : 0);
     wanted = direction * SIDE_SPEED;
   }
-  if (zoneForLevel(level).ice) diverSpeed += (wanted - diverSpeed) * Math.min(1, ICE_GRIP * dt);
+  if (zoneForLevel(level).ice || twist.ice) diverSpeed += (wanted - diverSpeed) * Math.min(1, ICE_GRIP * dt);
   else diverSpeed = wanted;
   diverX += diverSpeed * dt;
   if (diverX < DIVER_SIZE || diverX > WIDTH - DIVER_SIZE) diverSpeed = 0;   // bump the wall
@@ -558,7 +587,7 @@ function update(dt) {
   for (const ledge of ledges) {
     if (ledge.slide > 0) {
       const x = ledge.homeX + Math.sin(clock * 1.6 + ledge.phase) * ledge.slide;
-      ledge.holeX = Math.max(HOLE_WIDTH / 2, Math.min(WIDTH - HOLE_WIDTH / 2, x));
+      ledge.holeX = Math.max(holeWidth / 2, Math.min(WIDTH - holeWidth / 2, x));
     }
   }
 
@@ -578,7 +607,7 @@ function update(dt) {
     // While you're inside a gap, measure how much space you have to spare.
     const inside = ledge.y < DIVER_Y + DIVER_SIZE && ledge.y + LEDGE_THICKNESS > DIVER_Y - DIVER_SIZE;
     if (inside) {
-      const spare = HOLE_WIDTH / 2 - Math.abs(diverX - ledge.holeX) - DIVER_SIZE;
+      const spare = holeWidth / 2 - Math.abs(diverX - ledge.holeX) - DIVER_SIZE;
       ledge.closest = Math.min(ledge.closest, spare);
       // How close you got to the exact middle at any moment inside the gap
       ledge.centerMiss = Math.min(ledge.centerMiss, Math.abs(diverX - ledge.holeX));
@@ -589,8 +618,8 @@ function update(dt) {
       const dy = DIVER_Y - (ledge.y + LEDGE_THICKNESS / 2);
       if (dx * dx + dy * dy < (DIVER_SIZE + COIN_SIZE) ** 2) {
         ledge.coin.taken = true;
-        coins++;
-        coinsThisRun++;
+        coins += twist.coinValue || 1;
+        coinsThisRun += twist.coinValue || 1;
         saveNumber("freefall-coins", coins);
         playSound(1320, 0.05, "triangle", 0.07); setTimeout(() => playSound(1760, 0.08, "triangle", 0.07), 50);
       }
@@ -689,8 +718,8 @@ function updateCrash(dt) {
 // A ledge is two solid pieces with a hole between them.
 // You hit it if your circle overlaps either piece.
 function hitsLedge(ledge) {
-  const holeLeft = ledge.holeX - HOLE_WIDTH / 2;
-  const holeRight = ledge.holeX + HOLE_WIDTH / 2;
+  const holeLeft = ledge.holeX - holeWidth / 2;
+  const holeRight = ledge.holeX + holeWidth / 2;
   return circleTouchesBox(0, ledge.y, holeLeft, LEDGE_THICKNESS) ||
          circleTouchesBox(holeRight, ledge.y, WIDTH - holeRight, LEDGE_THICKNESS);
 }
@@ -744,8 +773,8 @@ function draw() {
 
   // Ledges
   for (const ledge of ledges) {
-    const holeLeft = ledge.holeX - HOLE_WIDTH / 2;
-    const holeRight = ledge.holeX + HOLE_WIDTH / 2;
+    const holeLeft = ledge.holeX - holeWidth / 2;
+    const holeRight = ledge.holeX + holeWidth / 2;
     const ledgeZone = zoneForLedge(ledge.number);   // each ledge wears its own zone's colors
     ctx.fillStyle = ledgeZone.edge;
     ctx.fillRect(0, ledge.y + 4, holeLeft, LEDGE_THICKNESS);
@@ -1133,9 +1162,11 @@ function drawHero(time) {
 function showReturning() {
   const today = dailyBest();
   // "NEW" until you've played today's challenge, then your score for today
-  document.getElementById("dailyButton").innerHTML = today > 0
+  const playedToday = loadNumber("freefall-daily-last", 0) === todayNumber();
+  document.getElementById("dailyButton").innerHTML = playedToday
     ? "Today: <strong>" + today + "</strong>"
     : "Daily #" + todayNumber() + '<span class="new-tag">NEW</span>';
+  showDailyNote();
   const played = loadNumber("freefall-played", 0) > 0;
   document.getElementById("tips").hidden = played;
   const line = document.getElementById("returning");
@@ -1200,6 +1231,66 @@ function dailyBest() {
   return loadNumber("freefall-daily-" + todayNumber(), 0);
 }
 
+// Today's twist: Daily #1 is Classic, #2 Tiny Gaps, and so on around the list.
+function todayTwist() {
+  return TWISTS[(todayNumber() - 1) % TWISTS.length];
+}
+
+// Your streak only counts if you played today or yesterday.
+function currentStreak() {
+  const last = loadNumber("freefall-daily-last", 0);
+  return last >= todayNumber() - 1 ? dailyStreak : 0;
+}
+
+// Called once at the end of each daily game: the first one each day grows
+// your streak and gives the daily bonus.
+function recordDailyPlay() {
+  dailyBonusNow = 0;
+  blazeUnlockedNow = false;
+  const last = loadNumber("freefall-daily-last", 0);
+  if (last === todayNumber()) return;          // already counted today
+  dailyStreak = last === todayNumber() - 1 ? dailyStreak + 1 : 1;
+  saveNumber("freefall-daily-streak", dailyStreak);
+  saveNumber("freefall-daily-last", todayNumber());
+  dailyBonusNow = DAILY_BONUS;
+  coins += DAILY_BONUS;
+  coinsThisRun += DAILY_BONUS;
+  saveNumber("freefall-coins", coins);
+  if (dailyStreak >= STREAK_CHARACTER_DAYS && !owned.includes("blaze")) {
+    owned.push("blaze");
+    saveText("freefall-owned", JSON.stringify(owned));
+    blazeUnlockedNow = true;
+  }
+  track("daily-streak-" + dailyStreak, "Daily streak of " + dailyStreak);
+}
+
+// "5h 12m" until the next daily challenge (midnight on your phone's clock)
+function timeToNextDaily() {
+  const now = new Date();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const mins = Math.max(1, Math.ceil((midnight - now) / 60000));
+  return mins >= 60 ? Math.floor(mins / 60) + "h " + (mins % 60) + "m" : mins + "m";
+}
+
+// The small line under the Daily button: today's twist, or the countdown once you've played.
+function showDailyNote() {
+  const note = document.getElementById("dailyNote");
+  const streak = currentStreak();
+  const playedToday = loadNumber("freefall-daily-last", 0) === todayNumber();
+  if (playedToday) {
+    note.innerHTML = "🔥 <strong>" + streak + "</strong>-day streak · Next daily in " + timeToNextDaily();
+  } else if (streak > 0) {
+    note.innerHTML = "Today: <strong>" + todayTwist().name + "</strong> · Keep your 🔥" + streak + " streak alive!";
+  } else {
+    note.innerHTML = "Today's twist: <strong>" + todayTwist().name + "</strong>. " + todayTwist().about;
+  }
+}
+let shownDay = todayNumber();
+setInterval(() => {
+  if (todayNumber() !== shownDay) { shownDay = todayNumber(); showReturning(); }   // a new day began
+  else if (state === "start") showDailyNote();
+}, 15000);
+
 let firstGame = loadNumber("freefall-played", 0) === 0;
 let onPhone = false;
 try { onPhone = window.matchMedia("(pointer: coarse)").matches; } catch (e) {}
@@ -1218,6 +1309,7 @@ function startGame(daily = dailyMode) {
   leftHeld = rightHeld = false;
   document.getElementById("startScreen").hidden = true;
   document.getElementById("gameOverScreen").hidden = true;
+  if (dailyMode && twist.name !== "Classic") addPopup(twist.name.toUpperCase() + "!", "coin");
 }
 
 function crash() {
@@ -1247,6 +1339,7 @@ function showGameOver() {
   if (!runSaved) {
     runSaved = true;
     if (dailyMode) {
+      recordDailyPlay();
       wasNewBest = score > dailyBest() && score > 0;
       if (wasNewBest) saveNumber("freefall-daily-" + todayNumber(), score);
     } else {
@@ -1269,7 +1362,7 @@ function showGameOver() {
 
   // The headline numbers
   document.getElementById("overWhere").textContent =
-    (dailyMode ? "Daily #" + todayNumber() : zoneForLevel(level).name) + " · Level " + level;
+    (dailyMode ? "Daily #" + todayNumber() + " · " + twist.name : zoneForLevel(level).name) + " · Level " + level;
   document.getElementById("finalScore").textContent = score;
   const bestTag = document.getElementById("bestTag");
   bestTag.className = "best-tag" + (wasNewBest ? " new" : "");
@@ -1283,13 +1376,26 @@ function showGameOver() {
   // Goals with progress bars: the next zone to discover and the next character to unlock
   const goals = document.getElementById("goals");
   goals.innerHTML = "";
+  if (dailyMode) {
+    // The daily streak, with the special character as the prize
+    const streak = currentStreak();
+    const hasBlaze = owned.includes("blaze");
+    let text = "🔥 <strong>" + streak + "-day streak</strong>";
+    if (blazeUnlockedNow) text = "🔥 <strong>" + streak + " days! You unlocked Blaze!</strong>";
+    else if (!hasBlaze) {
+      const left = STREAK_CHARACTER_DAYS - streak;
+      text += " · Blaze " + (left === 1 ? "tomorrow!" : "in " + left + " more days");
+    }
+    if (dailyBonusNow) text += "<br>+" + dailyBonusNow + " daily bonus coins";
+    goals.append(makeGoal("streak", text, hasBlaze ? 1 : streak / STREAK_CHARACTER_DAYS, blazeUnlockedNow));
+  }
   const nextZone = ZONES.find((z) => !badges.includes(z.badge));
-  if (nextZone) {
+  if (nextZone && !dailyMode) {
     const needed = (nextZone.fromLevel - 1) * LEDGES_PER_LEVEL;
     goals.append(makeGoal("zone", "<strong>New zone</strong> in " + (needed - ledgesPassed) + " more ledges",
       ledgesPassed / needed, false));
   }
-  const nextCharacter = CHARACTERS.find((ch) => !owned.includes(ch.id));
+  const nextCharacter = CHARACTERS.find((ch) => !owned.includes(ch.id) && !ch.streak);
   if (nextCharacter) {
     const ready = coins >= nextCharacter.price;
     goals.append(makeGoal("coins", ready
@@ -1352,7 +1458,7 @@ function renderShop() {
     const isOwned = owned.includes(ch.id);
     const card = document.createElement("button");
     card.className = "card" + (ch.id === chosen ? " selected" : "") + (isOwned ? "" : " locked");
-    card.disabled = !isOwned && coins < ch.price;
+    card.disabled = !isOwned && (ch.streak || coins < ch.price);
 
     // A small preview of the character
     const preview = document.createElement("canvas");
@@ -1367,7 +1473,8 @@ function renderShop() {
     name.textContent = ch.name;
     const price = document.createElement("span");
     price.className = "price";
-    price.textContent = ch.id === chosen ? "Playing" : isOwned ? "Tap to use" : ch.price + " coins";
+    price.textContent = ch.id === chosen ? "Playing" : isOwned ? "Tap to use" :
+      ch.streak ? "🔥 " + STREAK_CHARACTER_DAYS + "-day daily streak" : ch.price + " coins";
 
     card.append(preview, name, price);
     card.addEventListener("click", () => pickCharacter(ch));
@@ -1377,7 +1484,7 @@ function renderShop() {
 
 function pickCharacter(ch) {
   if (!owned.includes(ch.id)) {
-    if (coins < ch.price) return;
+    if (ch.streak || coins < ch.price) return;
     coins -= ch.price;                 // buy it
     owned.push(ch.id);
     saveNumber("freefall-coins", coins);
@@ -1514,8 +1621,13 @@ let shareFile = null;            // the score picture, made ahead of time so sha
 
 function shareMessage() {
   if (dailyMode) {
-    return "📅 Freefall Daily #" + todayNumber() + ": I scored " + score + " and fell " +
-      Math.floor(distanceFallen / 10) + " m. Same ledges for everyone today. Can you beat me? " + GAME_LINK;
+    // Wordle-style: one colored square per level you reached, then the splat
+    let squares = "";
+    for (let lvl = 1; lvl <= level; lvl++) squares += zoneForLevel(lvl).emoji;
+    const streak = currentStreak();
+    return "Freefall Daily #" + todayNumber() + " · " + twist.name + "\n" +
+      squares + "💥 " + score + "\n" +
+      (streak > 1 ? "🔥 " + streak + "-day streak\n" : "") + GAME_LINK;
   }
   return "💥 I scored " + score + " in Freefall and fell " + Math.floor(distanceFallen / 10) +
     " m into " + zoneForLevel(level).name + "!" + (wasNewBest ? " New personal best." : "") +
@@ -1553,7 +1665,7 @@ function makeScoreCard() {
   c.fillText(score, 300, 410);
   c.fillStyle = colors.muted;
   c.font = "26px Rubik, sans-serif";
-  c.fillText(Math.floor(distanceFallen / 10) + " m deep · " + zone.name, 300, 460);
+  c.fillText(Math.floor(distanceFallen / 10) + " m deep · " + (dailyMode ? twist.name : zone.name), 300, 460);
   if (wasNewBest) {
     c.fillStyle = colors.coin;
     c.font = "24px Bungee, Impact, sans-serif";
