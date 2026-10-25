@@ -456,7 +456,7 @@ const WIND_PUSH = 90;            // how hard it pushes (you move at 280)
 // day of the week plays a little differently. Leave a number out to keep the normal rule.
 //   holeWidth: gap size   coinChance: share of gaps with a coin   ice: slippery everywhere
 //   moving: every gap slides at least this much   speed: 1.25 = 25% faster   coinValue: coins worth more
-//   dark: only a circle of light around you
+//   dark: only a circle of light around you   flip: the world is upside down, so you rise
 const TWISTS = [
   { name: "Lights Out", about: "It's dark. You only see what your light reaches.", dark: true },
   { name: "Tiny Gaps",  about: "The gaps are narrower.", holeWidth: 68 },
@@ -464,7 +464,7 @@ const TWISTS = [
   { name: "All Ice",    about: "Slippery from the very first ledge.", ice: true },
   { name: "Wobbly",     about: "Every gap slides.", moving: 24 },
   { name: "Big & Fast", about: "Wider gaps, but 25% faster.", holeWidth: 96, speed: 1.25 },
-  { name: "Lucky Day",  about: "Every coin is worth 2.", coinValue: 2 },
+  { name: "Zero G",     about: "No gravity! You float up and the ledges drop down at you.", flip: true },
 ];
 const NO_TWIST = { name: "", about: "" };
 const LIGHT_RADIUS = 210;        // how far you can see on Lights Out day
@@ -828,7 +828,17 @@ function draw() {
   if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
 
   const zone = zoneForLevel(level);
-  if (zone.sky) {
+  // Zero G day: the whole world is drawn upside down, so you float up
+  // and the ledges come down at you. The words on top stay the right way up.
+  const flipped = !!twist.flip && state !== "start";
+  if (flipped) {
+    ctx.save();
+    ctx.translate(0, HEIGHT);
+    ctx.scale(1, -1);
+  }
+  if (flipped && !zone.sky) {
+    ctx.fillStyle = "#0b0a1f";   // deep space
+  } else if (zone.sky) {
     // Open sky: deep blue up top, warm sunset below
     const sky = ctx.createLinearGradient(0, 0, 0, HEIGHT);
     sky.addColorStop(0, "#3a6fd8");
@@ -840,8 +850,8 @@ function draw() {
   }
   ctx.fillRect(-20, -20, WIDTH + 40, HEIGHT + 40);
 
-  // Rock specks (in the sky they're little faraway clouds)
-  ctx.fillStyle = zone.rock;
+  // Rock specks (in the sky they're little faraway clouds, in space they're stars)
+  ctx.fillStyle = flipped && !zone.sky ? "rgba(255, 255, 255, 0.7)" : zone.rock;
   for (const s of specks) {
     ctx.beginPath();
     if (zone.sky) {
@@ -866,7 +876,7 @@ function draw() {
   for (let m = firstMark; m < metersOnTop + HEIGHT / 10; m += 50) {
     const y = (m - metersOnTop) * 10;
     ctx.fillRect(WIDTH - 10, y, 10, 1);
-    ctx.fillText(m + " m", WIDTH - 14, y + 4);
+    uprightText(ctx, m + " m", WIDTH - 14, y + 4, flipped);
   }
 
   // Ledges
@@ -918,7 +928,7 @@ function draw() {
       ctx.fillStyle = colors.diver;
       ctx.font = "12px Bungee, Impact, sans-serif";
       ctx.textAlign = "left";
-      ctx.fillText("YOUR BEST", 8, ledge.y + LEDGE_THICKNESS + 26);
+      uprightText(ctx, "YOUR BEST", 8, ledge.y + LEDGE_THICKNESS + 26, flipped);
     }
   }
 
@@ -935,7 +945,7 @@ function draw() {
     // Phoenix re-forms from the embers
     if (me.bird && crashTime > 0.8) {
       ctx.globalAlpha = Math.min(1, (crashTime - 0.8) * 3);
-      drawCharacter(ctx, me, diverX, DIVER_Y, DIVER_SIZE);
+      drawUpright(ctx, flipped, DIVER_Y, () => drawCharacter(ctx, me, diverX, DIVER_Y, DIVER_SIZE));
       ctx.globalAlpha = 1;
     }
   } else {
@@ -946,7 +956,7 @@ function draw() {
         ctx.fillStyle = "rgba(27, 21, 48, 0.35)";
         ctx.beginPath(); ctx.arc(diverX, DIVER_Y, DIVER_SIZE + 5, 0, Math.PI * 2); ctx.fill();
       }
-      drawCharacter(ctx, me, diverX, DIVER_Y, DIVER_SIZE);
+      drawUpright(ctx, flipped, DIVER_Y, () => drawCharacter(ctx, me, diverX, DIVER_Y, DIVER_SIZE));
     }
   }
 
@@ -962,6 +972,10 @@ function draw() {
     ctx.fillStyle = light;
     ctx.fillRect(-20, -20, WIDTH + 40, HEIGHT + 40);
   }
+  if (flipped) ctx.restore();
+
+  // On Zero G days you sit near the bottom, so the score and messages go below you.
+  const hudY = (y) => flipped ? HEIGHT - 130 + y : y;
 
   // Big score near the top while you play (a new zone's banner takes its place for a moment)
   if (state === "playing" && zoneFlash <= 0) {
@@ -971,21 +985,21 @@ function draw() {
     ctx.globalAlpha = 0.9;
     ctx.font = "44px Bungee, Impact, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(score, WIDTH / 2, 70);
+    ctx.fillText(score, WIDTH / 2, hudY(70));
     if (streak > 0) {
       ctx.fillStyle = colors.diver;
       ctx.font = "16px Bungee, Impact, sans-serif";
       let streakText = "x3 streak";
       if (streak < STREAK_FOR_X2) streakText = "streak " + streak + "/" + STREAK_FOR_X2;
       else if (streak < STREAK_FOR_X3) streakText = "x2 · " + streak + "/" + STREAK_FOR_X3;
-      ctx.fillText(streakText, WIDTH / 2, 96);
+      ctx.fillText(streakText, WIDTH / 2, hudY(96));
     }
     // The score to beat, when a friend challenged you to today's daily
     const target = dailyMode && levelFlash <= 0 && challengeToday();
     if (target) {
       ctx.fillStyle = colors.coin;
       ctx.font = "13px Bungee, Impact, sans-serif";
-      ctx.fillText(score > target.score ? "🎯 BEAT IT!" : "🎯 BEAT " + target.score, WIDTH / 2, 118);
+      ctx.fillText(score > target.score ? "🎯 BEAT IT!" : "🎯 BEAT " + target.score, WIDTH / 2, hudY(118));
     }
     ctx.restore();
     ctx.globalAlpha = 1;
@@ -997,7 +1011,7 @@ function draw() {
   for (const pop of popups) {
     ctx.globalAlpha = Math.min(1, pop.life * 2);
     ctx.fillStyle = colors[pop.color];
-    ctx.fillText(pop.text, WIDTH / 2, pop.y);
+    ctx.fillText(pop.text, WIDTH / 2, flipped ? HEIGHT - pop.y : pop.y);
   }
   ctx.globalAlpha = 1;
 
@@ -1010,7 +1024,7 @@ function draw() {
     ctx.fillStyle = colors.ink;
     ctx.font = "22px Bungee, Impact, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("LEVEL " + level + "!", WIDTH / 2, 126);
+    ctx.fillText("LEVEL " + level + "!", WIDTH / 2, flipped ? HEIGHT - 100 : 126);
     ctx.restore();
   }
 
@@ -1030,28 +1044,30 @@ function draw() {
     ctx.save();
     ctx.globalAlpha = Math.min(1, zoneFlash * 1.5);
     const newBadge = badgesThisRun.includes(zone.badge);
+    const boxHeight = newBadge ? 112 : 84;
+    const top = flipped ? HEIGHT - 8 - boxHeight : 8;
     ctx.fillStyle = "rgba(27, 21, 48, 0.6)";
-    roundedBox(ctx, 12, 8, WIDTH - 24, newBadge ? 112 : 84, 12);
+    roundedBox(ctx, 12, top, WIDTH - 24, boxHeight, 12);
     ctx.fill();
     ctx.textAlign = "center";
     ctx.fillStyle = zone.ledge;
     ctx.font = "11px Bungee, Impact, sans-serif";
-    ctx.fillText("ENTERING", WIDTH / 2, 26);
+    ctx.fillText("ENTERING", WIDTH / 2, top + 18);
     ctx.font = "22px Bungee, Impact, sans-serif";
-    ctx.fillText(zone.name.toUpperCase(), WIDTH / 2, 50);
+    ctx.fillText(zone.name.toUpperCase(), WIDTH / 2, top + 42);
     ctx.fillStyle = colors.ink;
     ctx.font = "13px Rubik, sans-serif";
-    ctx.fillText(zone.twist, WIDTH / 2, 72);
+    ctx.fillText(zone.twist, WIDTH / 2, top + 64);
     if (newBadge) {
       // A small badge picture next to its name
       const words = "NEW BADGE: " + zone.badge.toUpperCase();
       ctx.font = "12px Bungee, Impact, sans-serif";
       const wordsWidth = ctx.measureText(words).width;
       const left = WIDTH / 2 - (wordsWidth + 30) / 2;
-      drawBadge(ctx, zone, left + 11, 98, 11, false);
+      drawBadge(ctx, zone, left + 11, top + 90, 11, false);
       ctx.fillStyle = colors.coin;
       ctx.textAlign = "left";
-      ctx.fillText(words, left + 30, 103);
+      ctx.fillText(words, left + 30, top + 95);
     }
     ctx.restore();
   }
@@ -1268,6 +1284,28 @@ function drawTrail(c, character) {
 
 function currentCharacter() {
   return CHARACTERS.find((ch) => ch.id === chosen) || CHARACTERS[0];
+}
+
+// ===== ZERO G HELPERS =====
+// Text written inside the upside-down world, turned back the right way up
+function uprightText(c, text, x, y, flipped) {
+  if (!flipped) { c.fillText(text, x, y); return; }
+  c.save();
+  c.translate(x, y);
+  c.scale(1, -1);
+  c.fillText(text, 0, 0);
+  c.restore();
+}
+
+// Draw something (like your character) the right way up in the upside-down world
+function drawUpright(c, flipped, y, drawIt) {
+  if (!flipped) { drawIt(); return; }
+  c.save();
+  c.translate(0, y);
+  c.scale(1, -1);
+  c.translate(0, -y);
+  drawIt();
+  c.restore();
 }
 
 // ===== THE OTHER SIDE: SKY PICTURES =====
