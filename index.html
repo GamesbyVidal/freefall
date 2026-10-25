@@ -421,6 +421,8 @@ const ZONES = [
     twist: "Sliding gaps AND slippery!", badge: "Hot Shot" },
 ];
 // Each zone also has a badge, earned the first time you reach it.
+// One more badge isn't for a zone: a friend you challenged played and challenged you back.
+const FRIEND_BADGE = { badge: "Deep Friendship", name: "A friend took your challenge", ledge: "#ff8fb1", shaft: "#2a1530" };
 const ICE_GRIP = 8;              // lower = more slippery on ice
 
 // Daily challenge twists: each day gets the next one in this list, so every
@@ -1078,6 +1080,8 @@ function drawBadge(c, zone, x, y, radius, locked) {
     drawCoolCube(c);
   } else if (zone.badge === "Hot Shot") {
     drawHotShot(c);
+  } else if (zone.badge === FRIEND_BADGE.badge) {
+    drawFriends(c);
   }
   c.restore();
 }
@@ -1098,6 +1102,25 @@ function drawFace(c, x, y, spread, color) {
 }
 
 // Canary: a round yellow bird wearing a miner's helmet with a lamp
+// Deep Friendship: two little fallers side by side with a heart between them.
+function drawFriends(c) {
+  c.fillStyle = "#8fd8de";
+  c.beginPath(); c.arc(-8, 5, 8.5, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "#ff8fb1";
+  c.beginPath(); c.arc(8, 5, 8.5, 0, Math.PI * 2); c.fill();
+  drawFace(c, -8, 5, 3, "#1b1530");
+  drawFace(c, 8, 5, 3, "#1b1530");
+  // Heart
+  c.fillStyle = "#ff4f7a";
+  c.beginPath();
+  c.moveTo(0, -6);
+  c.bezierCurveTo(-1, -9, -7, -10, -6, -14);
+  c.bezierCurveTo(-5, -17, -1, -16, 0, -13);
+  c.bezierCurveTo(1, -16, 5, -17, 6, -14);
+  c.bezierCurveTo(7, -10, 1, -9, 0, -6);
+  c.fill();
+}
+
 function drawCanary(c) {
   c.fillStyle = "#ffd23f";
   c.beginPath(); c.arc(0, 4, 11, 0, Math.PI * 2); c.fill();
@@ -1391,8 +1414,18 @@ try {
   const params = new URLSearchParams(location.search);
   const c = parseInt(params.get("c"), 10);
   const d = parseInt(params.get("d"), 10);
-  if (c >= 0 && d > 0) challenge = { score: c, day: d };
+  if (c >= 0 && d > 0) challenge = { score: c, day: d, reply: params.get("r") === "1" };
 } catch (e) {}
+let friendBadgeNow = false;
+if (challenge) {
+  saveNumber("freefall-was-challenged", 1);
+  // A reply to a challenge you sent: your friend really played!
+  if (challenge.reply && loadNumber("freefall-challenges-sent", 0) > 0 && !badges.includes(FRIEND_BADGE.badge)) {
+    badges.push(FRIEND_BADGE.badge);
+    saveText("freefall-badges", JSON.stringify(badges));
+    friendBadgeNow = true;
+  }
+}
 
 // Only counts if it's for today's daily (yesterday's ledges were different)
 function challengeToday() {
@@ -1408,6 +1441,19 @@ function showChallenge() {
   document.getElementById("startButton").textContent = acceptingChallenge() ? "🎯 Accept challenge" : "Tap to fall";
   banner.hidden = !challenge;
   if (!challenge) return;
+  if (friendBadgeNow) {
+    // Celebrate the new badge first, with its picture
+    banner.innerHTML = "";
+    const picture = badgePicture(FRIEND_BADGE, 44, false);
+    picture.style.display = "block";
+    picture.style.width = picture.style.height = "44px";
+    picture.style.margin = "0 auto 4px";
+    const words = document.createElement("span");
+    words.innerHTML = "Your friend took your challenge! New badge: <strong>Deep Friendship</strong><br>" +
+      (today ? "They scored <strong>" + today.score + "</strong>. Can you beat it?" : "");
+    banner.append(picture, words);
+    return;
+  }
   if (!today) {
     banner.innerHTML = "🎯 Your friend's challenge was for Daily #" + challenge.day +
       ". Play today's daily and <strong>challenge them back!</strong>";
@@ -1610,17 +1656,20 @@ function renderShop() {
   // Badge shelf: earned badges show their name; the rest stay a mystery.
   const shelf = document.getElementById("badgeShelf");
   shelf.innerHTML = "";
-  for (const zone of ZONES) {
+  for (const zone of [...ZONES, FRIEND_BADGE]) {
     const earned = badges.includes(zone.badge);
     const item = document.createElement("div");
     item.className = "badge" + (earned ? "" : " locked");
+    if (zone === FRIEND_BADGE) item.style.gridColumn = "1 / -1";
     item.style.setProperty("--medal", zone.ledge);
     const name = document.createElement("span");
     name.className = "name";
     name.textContent = earned ? zone.badge : "???";
     const where = document.createElement("span");
     where.className = "price";
-    where.textContent = earned ? zone.name : "Reach level " + zone.fromLevel;
+    where.textContent = earned ? zone.name : zone === FRIEND_BADGE
+      ? "Challenge a friend to the daily. Earn it when they challenge you back."
+      : "Reach level " + zone.fromLevel;
     item.append(badgePicture(zone, 56, !earned), name, where);
     shelf.append(item);
   }
@@ -1797,7 +1846,9 @@ let shareFile = null;            // the score picture, made ahead of time so sha
 // A challenge link carries your best daily score and the day, like
 // .../freefall/?c=63&d=2, so your friend's game knows the score to beat.
 function challengeLink() {
-  return GAME_LINK + "?c=" + dailyBest() + "&d=" + todayNumber();
+  // "r=1" means "I was challenged too", so the friend who challenged me earns Deep Friendship
+  const reply = loadNumber("freefall-was-challenged", 0) === 1 ? "&r=1" : "";
+  return GAME_LINK + "?c=" + dailyBest() + "&d=" + todayNumber() + reply;
 }
 
 // The daily challenge message, built from your BEST try today (not just the last one).
@@ -1869,11 +1920,13 @@ function makeScoreCard() {
 
 document.getElementById("shareButton").addEventListener("click", (e) => {
   track(dailyMode ? "challenge-sent" : "share", dailyMode ? "Sent a daily challenge" : "Pressed Share score");
+  if (dailyMode) saveNumber("freefall-challenges-sent", loadNumber("freefall-challenges-sent", 0) + 1);
   shareText(e.currentTarget, shareMessage(), shareFile);
 });
 // The menu's "Challenge a friend" button, once you've played today's daily
 document.getElementById("challengeButton").addEventListener("click", (e) => {
   track("challenge-sent", "Sent a daily challenge");
+  saveNumber("freefall-challenges-sent", loadNumber("freefall-challenges-sent", 0) + 1);
   shareText(e.currentTarget, dailyChallengeMessage(), null);
 });
 
@@ -1991,7 +2044,10 @@ sizeCanvas();
 resetGame();
 showSoundSetting();
 showReturning();
-if (challenge) setTimeout(() => track("challenge-opened", "Opened a friend's challenge"), 1500);
+if (challenge) setTimeout(() => {
+  track("challenge-opened", "Opened a friend's challenge");
+  if (friendBadgeNow) track("deep-friendship", "Earned Deep Friendship");
+}, 1500);
 requestAnimationFrame((t) => { lastTime = t; loop(t); });
 document.fonts && document.fonts.ready.then(draw);
 </script>
