@@ -188,6 +188,7 @@
   .button-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
   button.daily { border-color: var(--coin); color: var(--coin); }
   .small-buttons button { padding: 10px 14px; font-size: 0.9rem; white-space: nowrap; }
+  button.daily:disabled { opacity: 0.5; cursor: default; }
   .overlay p.daily-note { font-size: 0.8rem; max-width: 30ch; margin-top: -4px; }
   .goal.streak .bar span { background: #ff7a45; }
   .new-tag {
@@ -424,6 +425,7 @@ const TWISTS = [
   { name: "Lucky Day",  about: "Every coin is worth 2.", coinValue: 2 },
 ];
 const NO_TWIST = { name: "", about: "" };
+const DAILY_TRIES = 3;           // daily challenge games allowed per day
 const DAILY_BONUS = 10;          // coins for your first daily game each day
 const STREAK_CHARACTER_DAYS = 7; // daily streak needed for the special character
 
@@ -1163,7 +1165,9 @@ function showReturning() {
   const today = dailyBest();
   // "NEW" until you've played today's challenge, then your score for today
   const playedToday = loadNumber("freefall-daily-last", 0) === todayNumber();
-  document.getElementById("dailyButton").innerHTML = playedToday
+  const dailyButton = document.getElementById("dailyButton");
+  dailyButton.disabled = triesLeft() <= 0;
+  dailyButton.innerHTML = playedToday
     ? "Today: <strong>" + today + "</strong>"
     : "Daily #" + todayNumber() + '<span class="new-tag">NEW</span>';
   showDailyNote();
@@ -1227,6 +1231,11 @@ function levelRandom() {
   return dailyMode && dailyRandom ? dailyRandom() : Math.random();
 }
 
+// How many daily tries are left today. A try counts as soon as the game starts.
+function triesLeft() {
+  return Math.max(0, DAILY_TRIES - loadNumber("freefall-daily-tries-" + todayNumber(), 0));
+}
+
 function dailyBest() {
   return loadNumber("freefall-daily-" + todayNumber(), 0);
 }
@@ -1278,7 +1287,11 @@ function showDailyNote() {
   const note = document.getElementById("dailyNote");
   const streak = currentStreak();
   const playedToday = loadNumber("freefall-daily-last", 0) === todayNumber();
-  if (playedToday) {
+  const left = triesLeft();
+  if (playedToday && left > 0) {
+    note.innerHTML = "🔥 <strong>" + streak + "</strong>-day streak · <strong>" + left + "</strong> " +
+      (left === 1 ? "try" : "tries") + " left today";
+  } else if (playedToday) {
     note.innerHTML = "🔥 <strong>" + streak + "</strong>-day streak · Next daily in " + timeToNextDaily();
   } else if (streak > 0) {
     note.innerHTML = "Today: <strong>" + todayTwist().name + "</strong> · Keep your 🔥" + streak + " streak alive!";
@@ -1297,6 +1310,10 @@ let onPhone = false;
 try { onPhone = window.matchMedia("(pointer: coarse)").matches; } catch (e) {}
 
 function startGame(daily = dailyMode) {
+  if (daily) {
+    if (triesLeft() <= 0) return;            // out of tries until tomorrow
+    saveNumber("freefall-daily-tries-" + todayNumber(), DAILY_TRIES - triesLeft() + 1);
+  }
   if (loadNumber("freefall-played", 0) === 0) { saveNumber("freefall-played", 1); track("first-game", "First game ever"); }
   else firstGame = false;
   dailyMode = daily;
@@ -1369,7 +1386,9 @@ function showGameOver() {
   bestTag.className = "best-tag" + (wasNewBest ? " new" : "");
   if (dailyMode) bestTag.textContent = wasNewBest ? "NEW DAILY BEST!" : "Today's best " + dailyBest();
   else bestTag.textContent = wasNewBest ? "NEW BEST!" : "Best " + best;
-  document.getElementById("restartButton").textContent = dailyMode ? "Try today's again" : "Tap to fall again";
+  const left = triesLeft();
+  document.getElementById("restartButton").textContent = !dailyMode ? "Tap to fall again"
+    : left > 0 ? "Try again (" + left + " left)" : "Play a normal game";
   document.getElementById("statLedges").textContent = ledgesPassed;
   document.getElementById("statDepth").textContent = Math.floor(distanceFallen / 10) + " m";
   document.getElementById("statCoins").textContent = "+" + coinsThisRun;
@@ -1388,6 +1407,8 @@ function showGameOver() {
       text += " · Blaze " + (left === 1 ? "tomorrow!" : "in " + left + " more days");
     }
     if (dailyBonusNow) text += "<br>+" + dailyBonusNow + " daily bonus coins";
+    text += "<br>" + (triesLeft() > 0 ? triesLeft() + (triesLeft() === 1 ? " try" : " tries") + " left today"
+      : "Out of tries. Next daily in " + timeToNextDaily());
     goals.append(makeGoal("streak", text, hasBlaze ? 1 : streak / STREAK_CHARACTER_DAYS, blazeUnlockedNow));
   }
   const nextZone = ZONES.find((z) => !badges.includes(z.badge));
@@ -1504,7 +1525,7 @@ document.getElementById("closeShop").addEventListener("click", closeShop);
 // crash has finished playing out.
 function tryStart() {
   if (state === "start") startGame(false);
-  else if (state === "crashed" && crashTime >= RESTART_DELAY) startGame();
+  else if (state === "crashed" && crashTime >= RESTART_DELAY) startGame(dailyMode && triesLeft() > 0);
 }
 
 document.getElementById("dailyButton").addEventListener("click", () => startGame(true));
