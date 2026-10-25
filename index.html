@@ -199,7 +199,10 @@
   }
   .overlay p.challenge strong { color: var(--coin); }
   #challengeButton { padding: 8px 16px; font-size: 0.85rem; }
-  .overlay p.daily-note { font-size: 0.8rem; max-width: 30ch; margin-top: -4px; }
+  .overlay p.stat-line { font-size: 0.85rem; max-width: none; }
+  .over .small-buttons { gap: 6px; }
+  .over .small-buttons button { padding: 8px 12px; font-size: 0.82rem; }
+  button.daily small { display: block; font-size: 0.68rem; opacity: 0.85; margin-top: 1px; }
   .goal.streak .bar span { background: #ff7a45; }
   .new-tag {
     display: inline-block;
@@ -327,7 +330,6 @@
         <button class="ghost daily" id="dailyButton">Daily challenge</button>
         <button class="ghost" data-open-shop>Characters</button>
       </div>
-      <p class="daily-note" id="dailyNote"></p>
       <button class="ghost daily small" id="challengeButton" hidden>🎯 Challenge a friend</button>
       <ul class="tips" id="tips">
         <li><span class="tip-icon ledge"></span>Slip through the gaps. Touch a ledge and it's over.</li>
@@ -355,16 +357,12 @@
         <span class="final-score" id="finalScore">0</span>
         <span class="best-tag" id="bestTag"></span>
       </div>
-      <div class="stats">
-        <div class="stat-box"><span class="label">Ledges</span><span class="value" id="statLedges">0</span></div>
-        <div class="stat-box"><span class="label">Depth</span><span class="value" id="statDepth">0 m</span></div>
-        <div class="stat-box"><span class="label">Coins</span><span class="value" id="statCoins">+0</span></div>
-      </div>
+      <p class="stat-line" id="statLine"></p>
       <div class="medal" id="medal" hidden></div>
       <div class="goals" id="goals"></div>
       <button id="restartButton">Tap to fall again</button>
-      <div class="button-row">
-        <button class="ghost" id="shareButton">Share score</button>
+      <div class="button-row small-buttons">
+        <button class="ghost" id="shareButton">Share</button>
         <button class="ghost" data-open-shop>Characters</button>
         <button class="ghost" id="menuButton">Menu</button>
       </div>
@@ -1413,21 +1411,19 @@ function drawHero(time) {
 
 // New players see the tips. Returning players see their best and their next goal instead.
 function showReturning() {
-  const today = dailyBest();
-  // "NEW" until you've played today's challenge, then your score for today
-  const playedToday = loadNumber("freefall-daily-last", 0) === todayNumber();
-  const dailyButton = document.getElementById("dailyButton");
-  dailyButton.disabled = triesLeft() <= 0;
-  dailyButton.innerHTML = playedToday
-    ? "Today: <strong>" + today + "</strong>"
-    : "Daily #" + todayNumber() + '<span class="new-tag">NEW</span>';
   showDailyNote();
+  showUnlockedButtons();
   showChallenge();
   const played = loadNumber("freefall-played", 0) > 0;
   document.getElementById("tips").hidden = played;
   const line = document.getElementById("returning");
   line.hidden = !played;
   const nextZone = ZONES.find((z) => !badges.includes(z.badge));
+  const games = loadNumber("freefall-games", 0);
+  if (games >= GAMES_BEFORE_DAILY && loadNumber("freefall-daily-last", 0) === 0) {
+    line.innerHTML = "🎉 <strong>New:</strong> the Daily challenge! Same ledges for everyone today.";
+    return;
+  }
   line.innerHTML = "Best <strong>" + best + "</strong> · " + (nextZone
     ? "Next badge: <strong>" + nextZone.badge + "</strong> at level " + nextZone.fromLevel
     : "All <strong>" + ZONES.length + "</strong> badges earned!");
@@ -1537,21 +1533,42 @@ function timeToNextDaily() {
 }
 
 // The small line under the Daily button: today's twist, or the countdown once you've played.
+// The Daily button says everything in two short lines:
+// before you play: "Daily #3 NEW" over today's twist (and your streak to keep alive)
+// after you play:  "Today: 18" over tries left, or the countdown to tomorrow's
 function showDailyNote() {
-  const note = document.getElementById("dailyNote");
+  const button = document.getElementById("dailyButton");
   const streak = currentStreak();
   const playedToday = loadNumber("freefall-daily-last", 0) === todayNumber();
   const left = triesLeft();
-  if (playedToday && left > 0) {
-    note.innerHTML = "🔥 <strong>" + streak + "</strong>-day streak · <strong>" + left + "</strong> " +
-      (left === 1 ? "try" : "tries") + " left today";
-  } else if (playedToday) {
-    note.innerHTML = "🔥 <strong>" + streak + "</strong>-day streak · Next daily in " + timeToNextDaily();
-  } else if (streak > 0) {
-    note.innerHTML = "Today: <strong>" + todayTwist().name + "</strong> · Keep your 🔥" + streak + " streak alive!";
+  button.disabled = left <= 0;
+  button.title = todayTwist().name + ": " + todayTwist().about;
+  let main, sub;
+  if (playedToday) {
+    main = "Today: <strong>" + dailyBest() + "</strong>";
+    sub = (streak > 0 ? "🔥" + streak + " · " : "") +
+      (left > 0 ? left + (left === 1 ? " try" : " tries") + " left" : "Next in " + timeToNextDaily());
   } else {
-    note.innerHTML = "Today's twist: <strong>" + todayTwist().name + "</strong>. " + todayTwist().about;
+    main = "Daily #" + todayNumber() + '<span class="new-tag">NEW</span>';
+    sub = todayTwist().name + (streak > 0 ? " · keep 🔥" + streak : "");
   }
+  button.innerHTML = main + "<small>" + sub + "</small>";
+}
+
+// New players see just the big button at first. The Daily challenge appears
+// after a few games, and Characters once you've grabbed a coin.
+const GAMES_BEFORE_DAILY = 3;
+// Players from before this counter existed have already seen everything
+if (loadNumber("freefall-played", 0) === 1 && loadNumber("freefall-games", -1) === -1) {
+  saveNumber("freefall-games", GAMES_BEFORE_DAILY);
+}
+function showUnlockedButtons() {
+  const games = loadNumber("freefall-games", 0);
+  const dailyOpen = games >= GAMES_BEFORE_DAILY || !!challenge;
+  const shopOpen = coins > 0 || owned.length > 1;
+  document.getElementById("dailyButton").hidden = !dailyOpen;
+  for (const button of document.querySelectorAll("[data-open-shop]")) button.hidden = !shopOpen;
+  document.querySelector(".start .small-buttons").hidden = !dailyOpen && !shopOpen;
 }
 // ===== CHALLENGES FROM FRIENDS =====
 // A friend's link looks like .../freefall/?c=63&d=2: they scored 63 on Daily #2.
@@ -1630,6 +1647,7 @@ function startGame(daily = dailyMode) {
     if (triesLeft() <= 0) return;            // out of tries until tomorrow
     saveNumber("freefall-daily-tries-" + todayNumber(), DAILY_TRIES - triesLeft() + 1);
   }
+  saveNumber("freefall-games", loadNumber("freefall-games", 0) + 1);
   if (loadNumber("freefall-played", 0) === 0) { saveNumber("freefall-played", 1); track("first-game", "First game ever"); }
   else firstGame = false;
   dailyMode = daily;
@@ -1717,58 +1735,59 @@ function showGameOver() {
   const left = triesLeft();
   document.getElementById("restartButton").textContent = !dailyMode ? "Tap to fall again"
     : left > 0 ? "Try again (" + left + " left)" : "Play a normal game";
-  document.getElementById("statLedges").textContent = ledgesPassed;
-  document.getElementById("statDepth").textContent = Math.floor(distanceFallen / 10) + " m";
-  document.getElementById("statCoins").textContent = "+" + coinsThisRun;
+  document.getElementById("statLine").innerHTML = "<strong>" + ledgesPassed + "</strong> ledges · <strong>" +
+    Math.floor(distanceFallen / 10) + " m</strong> deep · <strong>+" + coinsThisRun + "</strong> " + (coinsThisRun === 1 ? "coin" : "coins") +
+    (dailyBonusNow ? " (incl. daily bonus)" : "");
 
-  // Goals with progress bars: the next zone to discover and the next character to unlock
+  // ONE goal with a progress bar: the most exciting one right now. The list below
+  // is in order of importance; the first one that applies is shown.
   const goals = document.getElementById("goals");
   goals.innerHTML = "";
-  // Splatty: a reward for not giving up
-  if (splattyUnlockedNow) {
-    goals.append(makeGoal("coins", "<strong>🫠 100 splats! You unlocked Splatty!</strong>", 1, true));
-  } else if (!owned.includes("splatty") && splats >= SPLATS_FOR_SPLATTY * 0.75) {
-    goals.append(makeGoal("coins", "🫠 <strong>Splatty</strong>: " + splats + " / " + SPLATS_FOR_SPLATTY + " splats",
-      splats / SPLATS_FOR_SPLATTY, false));
-  }
+  const options = [];
+  if (splattyUnlockedNow) options.push(makeGoal("coins", "<strong>🫠 100 splats! You unlocked Splatty!</strong>", 1, true));
+  if (streakUnlockedNow) options.push(makeGoal("streak",
+    "🔥 <strong>" + currentStreak() + " days! You unlocked " + streakUnlockedNow.name + "!</strong>", 1, true));
   const target = dailyMode && challengeToday();
   if (target) {
     const mine = dailyBest();
-    goals.append(makeGoal("coins", mine > target.score
+    options.push(makeGoal("coins", mine > target.score
       ? "<strong>🎯 You beat your friend's " + target.score + "!</strong> Send it back."
       : "🎯 <strong>" + (target.score - mine + 1) + " more</strong> to beat your friend's " + target.score,
       mine / (target.score + 1), mine > target.score));
   }
   if (dailyMode) {
-    // The daily streak, with the special character as the prize
+    // The daily streak, with the next streak character as the prize
     const streak = currentStreak();
     const nextReward = CHARACTERS.find((ch) => ch.earned === "streak" && !owned.includes(ch.id));
     let text = "🔥 <strong>" + streak + "-day streak</strong>";
-    if (streakUnlockedNow) text = "🔥 <strong>" + streak + " days! You unlocked " + streakUnlockedNow.name + "!</strong>";
-    else if (nextReward) {
-      const left = nextReward.days - streak;
-      text += " · " + nextReward.name + " " + (left === 1 ? "tomorrow!" : "in " + left + " more days");
+    if (nextReward) {
+      const daysLeft = nextReward.days - streak;
+      text += " · " + nextReward.name + " " + (daysLeft === 1 ? "tomorrow!" : "in " + daysLeft + " days");
     }
-    if (dailyBonusNow) text += "<br>+" + dailyBonusNow + " daily bonus coins";
-    text += "<br>" + (triesLeft() > 0 ? triesLeft() + (triesLeft() === 1 ? " try" : " tries") + " left today"
-      : "Out of tries. Next daily in " + timeToNextDaily());
-    goals.append(makeGoal("streak", text, nextReward ? streak / nextReward.days : 1, !!streakUnlockedNow));
+    options.push(makeGoal("streak", text, nextReward ? streak / nextReward.days : 1, false));
+  }
+  const nextCharacter = CHARACTERS.find((ch) => !owned.includes(ch.id) && !ch.earned);
+  if (nextCharacter && coins >= nextCharacter.price) {
+    options.push(makeGoal("coins", "<strong>You can unlock " + nextCharacter.name + "!</strong>", 1, true));
   }
   const nextZone = ZONES.find((z) => !badges.includes(z.badge));
   if (nextZone && !dailyMode) {
     const needed = (nextZone.fromLevel - 1) * LEDGES_PER_LEVEL;
-    goals.append(makeGoal("zone", "<strong>New zone</strong> in " + (needed - ledgesPassed) + " more ledges",
+    options.push(makeGoal("zone", "<strong>New zone</strong> in " + (needed - ledgesPassed) + " more ledges",
       ledgesPassed / needed, false));
   }
-  const nextCharacter = CHARACTERS.find((ch) => !owned.includes(ch.id) && !ch.earned);
-  if (nextCharacter) {
-    const ready = coins >= nextCharacter.price;
-    goals.append(makeGoal("coins", ready
-      ? "<strong>You can unlock " + nextCharacter.name + "!</strong>"
-      : "<strong>" + nextCharacter.name + "</strong>: " + coins + " / " + nextCharacter.price + " coins",
-      coins / nextCharacter.price, ready));
+  if (!owned.includes("splatty") && splats >= SPLATS_FOR_SPLATTY * 0.75) {
+    options.push(makeGoal("coins", "🫠 <strong>Splatty</strong>: " + splats + " / " + SPLATS_FOR_SPLATTY + " splats",
+      splats / SPLATS_FOR_SPLATTY, false));
   }
-  document.getElementById("shareButton").textContent = dailyMode ? "🎯 Challenge a friend" : "Share score";
+  if (nextCharacter) {
+    options.push(makeGoal("coins", "<strong>" + nextCharacter.name + "</strong>: " + coins + " / " +
+      nextCharacter.price + " coins", coins / nextCharacter.price, false));
+  }
+  // A brand-new badge is the most exciting thing of all, so it replaces the goal.
+  if (!newest && options.length) goals.append(options[0]);
+  showUnlockedButtons();
+  document.getElementById("shareButton").textContent = dailyMode ? "🎯 Challenge a friend" : "Share";
   makeScoreCard();
   document.getElementById("gameOverScreen").hidden = false;
 }
@@ -1986,7 +2005,7 @@ function track(name, title) {
 }
 
 // ===== SHARING =====
-// On phones, "Share score" opens the phone's own share menu with a score picture
+// On phones, "Share" opens the phone's own share menu with a score picture
 // and the game link. Where that isn't possible, it copies a message instead.
 const GAME_LINK = "https://gamesbyvidal.github.io/freefall/";
 let shareFile = null;            // the score picture, made ahead of time so sharing opens instantly
