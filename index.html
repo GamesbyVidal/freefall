@@ -199,6 +199,10 @@
   }
   .overlay p.challenge strong { color: var(--coin); }
   #challengeButton { padding: 8px 16px; font-size: 0.85rem; }
+  /* The main "go" buttons: big and easy to hit with a thumb */
+  #startButton, #restartButton { font-size: 1.35rem; padding: 16px 20px; width: min(100%, 270px); white-space: nowrap; }
+  #restartButton { font-size: 1.15rem; }   /* longer words: "Tap to fall again", "Try again (2 left)" */
+  @media (max-height: 600px) { #restartButton { font-size: 0.95rem; padding: 14px 10px; } }
   .overlay p.stat-line { font-size: 0.85rem; max-width: none; }
   .over .small-buttons { gap: 6px; }
   .over .small-buttons button { padding: 8px 12px; font-size: 0.82rem; }
