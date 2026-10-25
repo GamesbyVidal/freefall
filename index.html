@@ -415,8 +415,9 @@ const ICE_GRIP = 8;              // lower = more slippery on ice
 // day of the week plays a little differently. Leave a number out to keep the normal rule.
 //   holeWidth: gap size   coinChance: share of gaps with a coin   ice: slippery everywhere
 //   moving: every gap slides at least this much   speed: 1.25 = 25% faster   coinValue: coins worth more
+//   dark: only a circle of light around you
 const TWISTS = [
-  { name: "Classic",    about: "No tricks, just ledges." },
+  { name: "Lights Out", about: "It's dark. You only see what your light reaches.", dark: true },
   { name: "Tiny Gaps",  about: "The gaps are narrower.", holeWidth: 68 },
   { name: "Coin Rush",  about: "Coins in almost every gap.", coinChance: 0.9 },
   { name: "All Ice",    about: "Slippery from the very first ledge.", ice: true },
@@ -425,6 +426,7 @@ const TWISTS = [
   { name: "Lucky Day",  about: "Every coin is worth 2.", coinValue: 2 },
 ];
 const NO_TWIST = { name: "", about: "" };
+const LIGHT_RADIUS = 210;        // how far you can see on Lights Out day
 const DAILY_TRIES = 3;           // daily challenge games allowed per day
 const DAILY_BONUS = 10;          // coins for your first daily game each day
 const STREAK_CHARACTER_DAYS = 7; // daily streak needed for the special character
@@ -835,6 +837,17 @@ function draw() {
     if (state !== "start") drawCharacter(ctx, me, diverX, DIVER_Y, DIVER_SIZE);
   }
 
+  // Lights Out: darkness everywhere except a pool of light around you,
+  // reaching further below you (where the ledges come from) than above.
+  if (twist.dark && state !== "start") {
+    const light = ctx.createRadialGradient(diverX, DIVER_Y + 70, 30, diverX, DIVER_Y + 70, LIGHT_RADIUS);
+    light.addColorStop(0, "rgba(5, 3, 12, 0)");
+    light.addColorStop(0.6, "rgba(5, 3, 12, 0.35)");
+    light.addColorStop(1, "rgba(5, 3, 12, 0.97)");
+    ctx.fillStyle = light;
+    ctx.fillRect(-20, -20, WIDTH + 40, HEIGHT + 40);
+  }
+
   // Big score in the middle of the screen while you play
   if (state === "playing") {
     ctx.fillStyle = colors.ink;
@@ -1240,7 +1253,7 @@ function dailyBest() {
   return loadNumber("freefall-daily-" + todayNumber(), 0);
 }
 
-// Today's twist: Daily #1 is Classic, #2 Tiny Gaps, and so on around the list.
+// Today's twist: Daily #1 is Lights Out, #2 Tiny Gaps, and so on around the list.
 function todayTwist() {
   const n = todayNumber() - 1;
   return TWISTS[((n % TWISTS.length) + TWISTS.length) % TWISTS.length];
@@ -1327,7 +1340,7 @@ function startGame(daily = dailyMode) {
   leftHeld = rightHeld = false;
   document.getElementById("startScreen").hidden = true;
   document.getElementById("gameOverScreen").hidden = true;
-  if (dailyMode && twist.name !== "Classic") addPopup(twist.name.toUpperCase() + "!", "coin");
+  if (dailyMode) addPopup(twist.name.toUpperCase() + "!", "coin");
 }
 
 function crash() {
