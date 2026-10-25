@@ -10,3 +10,11 @@ Play it at https://gamesbyvidal.github.io/freefall/
 - Collect coins to unlock new characters
 
 The whole game is one file, `index.html`. The numbers that control how it feels are in the SETTINGS section near the top of the script.
+
+## Lifetime
+
+A second project lives in the `lifetime` folder: a screen time goal app where one day for you is one year for your little person. Hit your daily goal and they live a great life.
+
+Play it at https://gamesbyvidal.github.io/freefall/lifetime/
+
+The life events and big life moments are lists near the top of the script in `lifetime/index.html`, so they are easy to edit.
