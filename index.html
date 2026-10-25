@@ -405,7 +405,7 @@ const ZONES = [
     twist: "Sliding gaps AND slippery!", badge: "Hot Shot" },
 ];
 // Each zone also has a badge, earned the first time you reach it.
-const ICE_GRIP = 5;              // lower = more slippery on ice
+const ICE_GRIP = 8;              // lower = more slippery on ice
 
 // Characters you can unlock with coins. "trail" is what follows you as you fall.
 const CHARACTERS = [
@@ -491,7 +491,7 @@ function pickHole(previousHoleX, number) {
   let reach = SIDE_SPEED * timeToReach * GAP_SPREAD;
   // Zones with sliding gaps or ice need gaps a bit closer together to stay fair.
   const zone = zoneForLedge(number);
-  if (zone.ice) reach *= 0.75;
+  if (zone.ice) reach *= 0.65;
   reach = Math.max(20, reach - zone.moving);
   if (number <= WARMUP_LEDGES) reach *= 0.45;   // warm-up: easy first jumps
   const min = Math.max(HOLE_WIDTH / 2, previousHoleX - reach);
