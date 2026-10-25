@@ -1203,7 +1203,7 @@ function loop(time) {
 // Everyone gets the same ledges and coins on the same day, so friends can
 // compare scores fairly. The "seed" is a number made from today's date:
 // the same seed always produces the same series of "random" numbers.
-const FIRST_DAY = new Date(2026, 9, 25);   // Daily #1 was 25 October 2026
+const FIRST_DAY = new Date(2026, 9, 24);   // Daily #1 was 24 October 2026
 let dailyMode = false;
 let dailyRandom = null;
 
@@ -1233,7 +1233,8 @@ function dailyBest() {
 
 // Today's twist: Daily #1 is Classic, #2 Tiny Gaps, and so on around the list.
 function todayTwist() {
-  return TWISTS[(todayNumber() - 1) % TWISTS.length];
+  const n = todayNumber() - 1;
+  return TWISTS[((n % TWISTS.length) + TWISTS.length) % TWISTS.length];
 }
 
 // Your streak only counts if you played today or yesterday.
