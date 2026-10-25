@@ -442,6 +442,7 @@ const LIGHT_RADIUS = 210;        // how far you can see on Lights Out day
 const DAILY_TRIES = 3;           // daily challenge games allowed per day
 const DAILY_BONUS = 10;          // coins for your first daily game each day
 const STREAK_CHARACTER_DAYS = 7; // daily streak needed for the special character
+const SPLATS_FOR_SPLATTY = 100;  // splat this many times (ever) to unlock Splatty
 
 // Characters you can unlock with coins. "trail" is what follows you as you fall.
 const CHARACTERS = [
@@ -451,8 +452,9 @@ const CHARACTERS = [
   { id: "bubble", name: "Bubble", price: 120, color: "#9fd9ff", trail: "bubbles", ring: true },
   { id: "goldie", name: "Goldie", price: 250, color: "#f5d04a", trail: "sparkle" },
   { id: "comet",  name: "Comet",  price: 500, color: "#ffffff", trail: "streak" },
-  // Can't be bought: play the daily challenge 7 days in a row
-  { id: "blaze",  name: "Blaze",  price: 0, streak: true, color: "#ff4fa3", trail: "fire" },
+  // These can't be bought. "earned" says how you unlock them.
+  { id: "blaze",   name: "Blaze",   price: 0, earned: "streak", color: "#ff4fa3", trail: "fire" },
+  { id: "splatty", name: "Splatty", price: 0, earned: "splats", color: "#9be36a", trail: "goo", goo: true },
 ];
 
 // ===== 2. GAME STATE =====
@@ -485,6 +487,8 @@ let holeWidth = HOLE_WIDTH;      // gap size for this game (a twist can change i
 let dailyStreak = loadNumber("freefall-daily-streak", 0);   // daily challenges played in a row
 let dailyBonusNow = 0;           // daily bonus coins given this game
 let blazeUnlockedNow = false;
+let splats = loadNumber("freefall-splats", 0);   // every crash, ever
+let splattyUnlockedNow = false;
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -946,6 +950,7 @@ function draw() {
 // Draws a character: a circle (or a ring for Bubble) with two eyes looking down.
 // It's also used for the little previews in the Characters screen.
 function drawCharacter(c, character, x, y, size) {
+  if (character.goo) { drawGoo(c, character, x, y, size); return; }
   c.fillStyle = character.color;
   c.strokeStyle = character.color;
   c.lineWidth = size * 0.28;
@@ -957,6 +962,48 @@ function drawCharacter(c, character, x, y, size) {
   c.arc(x - size * 0.3, y + size * 0.3, size * 0.17, 0, Math.PI * 2);
   c.arc(x + size * 0.3, y + size * 0.3, size * 0.17, 0, Math.PI * 2);
   c.fill();
+}
+
+// Splatty: a wobbly blob with drips hanging off the top (you fall downward,
+// so the goo trails behind you), a shiny spot and a happy face.
+function drawGoo(c, character, x, y, size) {
+  const t = performance.now() / 1000;
+  c.fillStyle = character.color;
+  c.beginPath();
+  for (let i = 0; i <= 24; i++) {
+    const a = (i / 24) * Math.PI * 2;
+    const wobble = 1 + Math.sin(a * 3 + t * 6) * 0.06 + Math.sin(a * 5 - t * 4) * 0.04;
+    const px = x + Math.cos(a) * size * wobble;
+    const py = y + Math.sin(a) * size * wobble;
+    if (i === 0) c.moveTo(px, py); else c.lineTo(px, py);
+  }
+  c.fill();
+  // Drips stretching up off the top
+  for (const [dx, len] of [[-0.45, 0.55], [0.1, 0.8], [0.5, 0.45]]) {
+    const stretch = len + Math.sin(t * 3 + dx * 5) * 0.12;
+    c.beginPath();
+    c.ellipse(x + dx * size, y - size * (0.75 + stretch / 2), size * 0.16, size * stretch / 2 + size * 0.1, 0, 0, Math.PI * 2);
+    c.fill();
+    c.beginPath();
+    c.arc(x + dx * size, y - size * (0.8 + stretch), size * 0.2, 0, Math.PI * 2);
+    c.fill();
+  }
+  // Shine
+  c.fillStyle = "rgba(255, 255, 255, 0.45)";
+  c.beginPath();
+  c.ellipse(x - size * 0.4, y - size * 0.35, size * 0.18, size * 0.11, -0.6, 0, Math.PI * 2);
+  c.fill();
+  // Eyes and a little smile
+  c.fillStyle = colors.shaft;
+  c.beginPath();
+  c.arc(x - size * 0.3, y + size * 0.2, size * 0.17, 0, Math.PI * 2);
+  c.arc(x + size * 0.3, y + size * 0.2, size * 0.17, 0, Math.PI * 2);
+  c.fill();
+  c.strokeStyle = colors.shaft;
+  c.lineWidth = Math.max(1, size * 0.1);
+  c.beginPath();
+  c.arc(x, y + size * 0.4, size * 0.22, 0.2, Math.PI - 0.2);
+  c.stroke();
 }
 
 // Each trail style draws your recent positions differently.
@@ -978,6 +1025,10 @@ function drawTrail(c, character) {
       c.arc(t.x + Math.sin(t.y / 9) * 6, t.y, 2 + fade * 3, 0, Math.PI * 2);
       c.stroke();
       continue;
+    } else if (character.trail === "goo") {
+      // Blobs of goo left hanging in the air, shrinking as they fade
+      if ((Math.round(t.y) % 3) !== 0) continue;
+      c.ellipse(t.x + Math.sin(t.y) * 4, t.y, 4 * fade + 1.5, 6 * fade + 1.5, 0, 0, Math.PI * 2);
     } else if (character.trail === "streak") {
       c.arc(t.x, t.y, DIVER_SIZE * fade, 0, Math.PI * 2);
     }
@@ -1178,16 +1229,17 @@ function drawHero(time) {
   drawCharacter(c, me, x, y, 14);
   // Blink for a moment every few seconds: cover the eyes and draw closed lids
   if (time % 3200 < 140) {
+    const eyeY = y + (me.goo ? 2.8 : 4.2);
     c.fillStyle = me.ring ? zone.shaft : me.color;
     c.beginPath();
-    c.arc(x - 4.2, y + 4.2, 3.2, 0, Math.PI * 2);
-    c.arc(x + 4.2, y + 4.2, 3.2, 0, Math.PI * 2);
+    c.arc(x - 4.2, eyeY, 3.2, 0, Math.PI * 2);
+    c.arc(x + 4.2, eyeY, 3.2, 0, Math.PI * 2);
     c.fill();
     c.strokeStyle = me.ring ? me.color : colors.shaft;
     c.lineWidth = 1.5;
     c.beginPath();
-    c.moveTo(x - 6.5, y + 4.2); c.lineTo(x - 1.9, y + 4.2);
-    c.moveTo(x + 1.9, y + 4.2); c.lineTo(x + 6.5, y + 4.2);
+    c.moveTo(x - 6.5, eyeY); c.lineTo(x - 1.9, eyeY);
+    c.moveTo(x + 1.9, eyeY); c.lineTo(x + 6.5, eyeY);
     c.stroke();
   }
 }
@@ -1404,6 +1456,14 @@ function startGame(daily = dailyMode) {
 
 function crash() {
   state = "crashed";
+  splats++;
+  saveNumber("freefall-splats", splats);
+  splattyUnlockedNow = false;
+  if (splats >= SPLATS_FOR_SPLATTY && !owned.includes("splatty")) {
+    owned.push("splatty");
+    saveText("freefall-owned", JSON.stringify(owned));
+    splattyUnlockedNow = true;
+  }
   track("splat-level-" + level, "Splat on level " + level);
   crashTime = 0;
   popups = [];
@@ -1471,6 +1531,13 @@ function showGameOver() {
   // Goals with progress bars: the next zone to discover and the next character to unlock
   const goals = document.getElementById("goals");
   goals.innerHTML = "";
+  // Splatty: a reward for not giving up
+  if (splattyUnlockedNow) {
+    goals.append(makeGoal("coins", "<strong>🫠 100 splats! You unlocked Splatty!</strong>", 1, true));
+  } else if (!owned.includes("splatty") && splats >= SPLATS_FOR_SPLATTY * 0.75) {
+    goals.append(makeGoal("coins", "🫠 <strong>Splatty</strong>: " + splats + " / " + SPLATS_FOR_SPLATTY + " splats",
+      splats / SPLATS_FOR_SPLATTY, false));
+  }
   const target = dailyMode && challengeToday();
   if (target) {
     const mine = dailyBest();
@@ -1500,7 +1567,7 @@ function showGameOver() {
     goals.append(makeGoal("zone", "<strong>New zone</strong> in " + (needed - ledgesPassed) + " more ledges",
       ledgesPassed / needed, false));
   }
-  const nextCharacter = CHARACTERS.find((ch) => !owned.includes(ch.id) && !ch.streak);
+  const nextCharacter = CHARACTERS.find((ch) => !owned.includes(ch.id) && !ch.earned);
   if (nextCharacter) {
     const ready = coins >= nextCharacter.price;
     goals.append(makeGoal("coins", ready
@@ -1563,7 +1630,7 @@ function renderShop() {
     const isOwned = owned.includes(ch.id);
     const card = document.createElement("button");
     card.className = "card" + (ch.id === chosen ? " selected" : "") + (isOwned ? "" : " locked");
-    card.disabled = !isOwned && (ch.streak || coins < ch.price);
+    card.disabled = !isOwned && (ch.earned || coins < ch.price);
 
     // A small preview of the character
     const preview = document.createElement("canvas");
@@ -1579,7 +1646,8 @@ function renderShop() {
     const price = document.createElement("span");
     price.className = "price";
     price.textContent = ch.id === chosen ? "Playing" : isOwned ? "Tap to use" :
-      ch.streak ? "🔥 " + STREAK_CHARACTER_DAYS + "-day daily streak" : ch.price + " coins";
+      ch.earned === "streak" ? "🔥 " + STREAK_CHARACTER_DAYS + "-day daily streak" :
+      ch.earned === "splats" ? "Splat " + SPLATS_FOR_SPLATTY + " times (" + splats + ")" : ch.price + " coins";
 
     card.append(preview, name, price);
     card.addEventListener("click", () => pickCharacter(ch));
@@ -1589,7 +1657,7 @@ function renderShop() {
 
 function pickCharacter(ch) {
   if (!owned.includes(ch.id)) {
-    if (ch.streak || coins < ch.price) return;
+    if (ch.earned || coins < ch.price) return;
     coins -= ch.price;                 // buy it
     owned.push(ch.id);
     saveNumber("freefall-coins", coins);
