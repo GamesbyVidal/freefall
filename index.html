@@ -189,6 +189,16 @@
   button.daily { border-color: var(--coin); color: var(--coin); }
   .small-buttons button { padding: 10px 14px; font-size: 0.9rem; white-space: nowrap; }
   button.daily:disabled { opacity: 0.5; cursor: default; }
+  .overlay p.challenge {
+    color: var(--ink);
+    border: 1px solid var(--coin);
+    border-radius: 12px;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    max-width: 30ch;
+  }
+  .overlay p.challenge strong { color: var(--coin); }
+  #challengeButton { padding: 8px 16px; font-size: 0.85rem; }
   .overlay p.daily-note { font-size: 0.8rem; max-width: 30ch; margin-top: -4px; }
   .goal.streak .bar span { background: #ff7a45; }
   .new-tag {
@@ -310,6 +320,7 @@
     <div class="overlay start" id="startScreen">
       <canvas class="hero" id="heroCanvas"></canvas>
       <h2>How deep can you fall?</h2>
+      <p class="challenge" id="challengeBanner" hidden></p>
       <p class="returning" id="returning" hidden></p>
       <button class="pulse" id="startButton">Tap to fall</button>
       <div class="button-row small-buttons">
@@ -317,6 +328,7 @@
         <button class="ghost" data-open-shop>Characters</button>
       </div>
       <p class="daily-note" id="dailyNote"></p>
+      <button class="ghost daily small" id="challengeButton" hidden>🎯 Challenge a friend</button>
       <ul class="tips" id="tips">
         <li><span class="tip-icon ledge"></span>Slip through the gaps. Touch a ledge and it's over.</li>
         <li><span class="tip-icon glow"></span>Hit the glowing middle in a row for x2 and x3.</li>
@@ -863,6 +875,13 @@ function draw() {
       else if (streak < STREAK_FOR_X3) streakText = "x2 · " + streak + "/" + STREAK_FOR_X3;
       ctx.fillText(streakText, WIDTH / 2, 96);
     }
+    // The score to beat, when a friend challenged you to today's daily
+    const target = dailyMode && challengeToday();
+    if (target) {
+      ctx.fillStyle = colors.coin;
+      ctx.font = "13px Bungee, Impact, sans-serif";
+      ctx.fillText(score > target.score ? "🎯 BEAT IT!" : "🎯 BEAT " + target.score, WIDTH / 2, 118);
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -1184,6 +1203,7 @@ function showReturning() {
     ? "Today: <strong>" + today + "</strong>"
     : "Daily #" + todayNumber() + '<span class="new-tag">NEW</span>';
   showDailyNote();
+  showChallenge();
   const played = loadNumber("freefall-played", 0) > 0;
   document.getElementById("tips").hidden = played;
   const line = document.getElementById("returning");
@@ -1312,6 +1332,45 @@ function showDailyNote() {
     note.innerHTML = "Today's twist: <strong>" + todayTwist().name + "</strong>. " + todayTwist().about;
   }
 }
+// ===== CHALLENGES FROM FRIENDS =====
+// A friend's link looks like .../freefall/?c=63&d=2: they scored 63 on Daily #2.
+let challenge = null;
+try {
+  const params = new URLSearchParams(location.search);
+  const c = parseInt(params.get("c"), 10);
+  const d = parseInt(params.get("d"), 10);
+  if (c >= 0 && d > 0) challenge = { score: c, day: d };
+} catch (e) {}
+
+// Only counts if it's for today's daily (yesterday's ledges were different)
+function challengeToday() {
+  return challenge && challenge.day === todayNumber() ? challenge : null;
+}
+
+function showChallenge() {
+  const banner = document.getElementById("challengeBanner");
+  const playedToday = loadNumber("freefall-daily-last", 0) === todayNumber();
+  document.getElementById("challengeButton").hidden = !playedToday;
+  const today = challengeToday();
+  // While you haven't beaten it yet, the big button takes the challenge.
+  document.getElementById("startButton").textContent = acceptingChallenge() ? "🎯 Accept challenge" : "Tap to fall";
+  banner.hidden = !challenge;
+  if (!challenge) return;
+  if (!today) {
+    banner.innerHTML = "🎯 Your friend's challenge was for Daily #" + challenge.day +
+      ". Play today's daily and <strong>challenge them back!</strong>";
+  } else if (dailyBest() > today.score) {
+    banner.innerHTML = "🎯 You beat your friend's <strong>" + today.score + "</strong>! Send them yours.";
+  } else {
+    banner.innerHTML = "🎯 Your friend scored <strong>" + today.score + "</strong> on today's daily. Can you beat it?";
+  }
+}
+
+function acceptingChallenge() {
+  const today = challengeToday();
+  return !!today && dailyBest() <= today.score && triesLeft() > 0;
+}
+
 let shownDay = todayNumber();
 setInterval(() => {
   if (todayNumber() !== shownDay) { shownDay = todayNumber(); showReturning(); }   // a new day began
@@ -1372,7 +1431,10 @@ function showGameOver() {
     if (dailyMode) {
       recordDailyPlay();
       wasNewBest = score > dailyBest() && score > 0;
-      if (wasNewBest) saveNumber("freefall-daily-" + todayNumber(), score);
+      if (wasNewBest) {
+        saveNumber("freefall-daily-" + todayNumber(), score);
+        saveNumber("freefall-daily-level-" + todayNumber(), level);
+      }
     } else {
       wasNewBest = score > best && score > 0;
       if (score > best) { best = score; saveNumber("freefall-best-score", best); }
@@ -1409,6 +1471,14 @@ function showGameOver() {
   // Goals with progress bars: the next zone to discover and the next character to unlock
   const goals = document.getElementById("goals");
   goals.innerHTML = "";
+  const target = dailyMode && challengeToday();
+  if (target) {
+    const mine = dailyBest();
+    goals.append(makeGoal("coins", mine > target.score
+      ? "<strong>🎯 You beat your friend's " + target.score + "!</strong> Send it back."
+      : "🎯 <strong>" + (target.score - mine + 1) + " more</strong> to beat your friend's " + target.score,
+      mine / (target.score + 1), mine > target.score));
+  }
   if (dailyMode) {
     // The daily streak, with the special character as the prize
     const streak = currentStreak();
@@ -1438,7 +1508,7 @@ function showGameOver() {
       : "<strong>" + nextCharacter.name + "</strong>: " + coins + " / " + nextCharacter.price + " coins",
       coins / nextCharacter.price, ready));
   }
-  document.getElementById("shareButton").textContent = "Share score";
+  document.getElementById("shareButton").textContent = dailyMode ? "🎯 Challenge a friend" : "Share score";
   makeScoreCard();
   document.getElementById("gameOverScreen").hidden = false;
 }
@@ -1537,7 +1607,7 @@ document.getElementById("closeShop").addEventListener("click", closeShop);
 // You can start or restart by tapping anywhere, as long as the
 // crash has finished playing out.
 function tryStart() {
-  if (state === "start") startGame(false);
+  if (state === "start") startGame(acceptingChallenge());
   else if (state === "crashed" && crashTime >= RESTART_DELAY) startGame(dailyMode && triesLeft() > 0);
 }
 
@@ -1631,6 +1701,8 @@ try {
 // GoatCounter (free) counts visits and a few game moments, with no cookies and
 // nothing personal. Only on the real site, so testing doesn't count.
 // See the numbers at https://gamesbyvidal.goatcounter.com
+// Events: play, play-daily, first-game, splat-level-N, share, challenge-sent,
+// challenge-opened, daily-streak-N.
 const onRealSite = location.hostname === "gamesbyvidal.github.io";
 if (onRealSite) {
   const counter = document.createElement("script");
@@ -1654,16 +1726,27 @@ function track(name, title) {
 const GAME_LINK = "https://gamesbyvidal.github.io/freefall/";
 let shareFile = null;            // the score picture, made ahead of time so sharing opens instantly
 
+// A challenge link carries your best daily score and the day, like
+// .../freefall/?c=63&d=2, so your friend's game knows the score to beat.
+function challengeLink() {
+  return GAME_LINK + "?c=" + dailyBest() + "&d=" + todayNumber();
+}
+
+// The daily challenge message, built from your BEST try today (not just the last one).
+// Wordle-style: one colored square per level that run reached, then the splat.
+function dailyChallengeMessage() {
+  const bestLevel = loadNumber("freefall-daily-level-" + todayNumber(), 1);
+  let squares = "";
+  for (let lvl = 1; lvl <= bestLevel; lvl++) squares += zoneForLevel(lvl).emoji;
+  const streak = currentStreak();
+  return "Freefall Daily #" + todayNumber() + " · " + todayTwist().name + "\n" +
+    squares + "💥 " + dailyBest() + "\n" +
+    (streak > 1 ? "🔥 " + streak + "-day streak\n" : "") +
+    "Can you beat my " + dailyBest() + "? 👇\n" + challengeLink();
+}
+
 function shareMessage() {
-  if (dailyMode) {
-    // Wordle-style: one colored square per level you reached, then the splat
-    let squares = "";
-    for (let lvl = 1; lvl <= level; lvl++) squares += zoneForLevel(lvl).emoji;
-    const streak = currentStreak();
-    return "Freefall Daily #" + todayNumber() + " · " + twist.name + "\n" +
-      squares + "💥 " + score + "\n" +
-      (streak > 1 ? "🔥 " + streak + "-day streak\n" : "") + GAME_LINK;
-  }
+  if (dailyMode) return dailyChallengeMessage();
   return "💥 I scored " + score + " in Freefall and fell " + Math.floor(distanceFallen / 10) +
     " m into " + zoneForLevel(level).name + "!" + (wasNewBest ? " New personal best." : "") +
     " Can you beat me? " + GAME_LINK;
@@ -1697,7 +1780,7 @@ function makeScoreCard() {
   c.fillText(dailyMode ? "FREEFALL DAILY #" + todayNumber() : "FREEFALL", 300, 70);
   c.fillStyle = colors.ink;
   c.font = "150px Bungee, Impact, sans-serif";
-  c.fillText(score, 300, 410);
+  c.fillText(dailyMode ? dailyBest() : score, 300, 410);
   c.fillStyle = colors.muted;
   c.font = "26px Rubik, sans-serif";
   c.fillText(Math.floor(distanceFallen / 10) + " m deep · " + (dailyMode ? twist.name : zone.name), 300, 460);
@@ -1708,7 +1791,7 @@ function makeScoreCard() {
   }
   c.fillStyle = colors.ink;
   c.font = "24px Rubik, sans-serif";
-  c.fillText("Can you beat me?  gamesbyvidal.github.io/freefall", 300, 565);
+  c.fillText(dailyMode ? "Beat my score in today's daily!" : "Can you beat me?  gamesbyvidal.github.io/freefall", 300, 565);
 
   shareFile = null;
   card.toBlob((blob) => {
@@ -1716,14 +1799,21 @@ function makeScoreCard() {
   }, "image/png");
 }
 
-document.getElementById("shareButton").addEventListener("click", async (e) => {
-  const button = e.currentTarget;
-  const text = shareMessage();
-  track("share", "Pressed Share score");
+document.getElementById("shareButton").addEventListener("click", (e) => {
+  track(dailyMode ? "challenge-sent" : "share", dailyMode ? "Sent a daily challenge" : "Pressed Share score");
+  shareText(e.currentTarget, shareMessage(), shareFile);
+});
+// The menu's "Challenge a friend" button, once you've played today's daily
+document.getElementById("challengeButton").addEventListener("click", (e) => {
+  track("challenge-sent", "Sent a daily challenge");
+  shareText(e.currentTarget, dailyChallengeMessage(), null);
+});
+
+async function shareText(button, text, file) {
   // 1. The phone's share menu, with the picture if the phone allows it
   if (navigator.share) {
-    const withPicture = { text: text, files: [shareFile] };
-    const data = shareFile && navigator.canShare && navigator.canShare(withPicture) ? withPicture : { text: text };
+    const withPicture = { text: text, files: [file] };
+    const data = file && navigator.canShare && navigator.canShare(withPicture) ? withPicture : { text: text };
     try {
       await navigator.share(data);
       button.textContent = "Shared!";
@@ -1739,7 +1829,7 @@ document.getElementById("shareButton").addEventListener("click", async (e) => {
   } catch (err) {
     button.textContent = text;
   }
-});
+}
 
 // Sound on/off
 const soundButton = document.getElementById("soundButton");
@@ -1833,6 +1923,7 @@ sizeCanvas();
 resetGame();
 showSoundSetting();
 showReturning();
+if (challenge) setTimeout(() => track("challenge-opened", "Opened a friend's challenge"), 1500);
 requestAnimationFrame((t) => { lastTime = t; loop(t); });
 document.fonts && document.fonts.ready.then(draw);
 </script>
