@@ -122,6 +122,13 @@
   .overlay.start { gap: 16px; background: rgba(18, 14, 34, 0.92); overflow-y: auto; justify-content: safe center; touch-action: pan-y; }
   .overlay.start h2 { font-size: 1.45rem; }
   .hero { width: 104px; height: 104px; }
+  .overlay.start .tips { margin-top: 6px; }
+  /* Short phone screens: shrink the start screen so the button sits higher */
+  @media (max-height: 760px) {
+    .overlay.start { gap: 10px; padding: 16px; }
+    .hero { width: 72px; height: 72px; }
+    .overlay.start .tips { font-size: 0.8rem; gap: 6px; }
+  }
   .tips {
     list-style: none;
     margin: 0;
@@ -287,16 +294,16 @@
     <div class="overlay start" id="startScreen">
       <canvas class="hero" id="heroCanvas"></canvas>
       <h2>How deep can you fall?</h2>
+      <p class="returning" id="returning" hidden></p>
+      <button class="pulse" id="startButton">Tap to fall</button>
+      <button class="ghost daily" id="dailyButton">Daily challenge</button>
+      <button class="ghost" data-open-shop>Characters &amp; badges</button>
       <ul class="tips">
         <li><span class="tip-icon ledge"></span>Slip through the gaps. Touch a ledge and it's over.</li>
         <li><span class="tip-icon glow"></span>Hit the glowing middle in a row for x2 and x3.</li>
         <li><span class="tip-icon coin"></span>Grab coins to unlock new characters.</li>
         <li><span class="tip-icon zones"></span>Every 2 levels: a new zone and a new badge.</li>
       </ul>
-      <p class="returning" id="returning" hidden></p>
-      <button class="pulse" id="startButton">Tap to fall</button>
-      <button class="ghost daily" id="dailyButton">Daily challenge</button>
-      <button class="ghost" data-open-shop>Characters &amp; badges</button>
     </div>
 
     <div class="shop" id="shop" hidden>
