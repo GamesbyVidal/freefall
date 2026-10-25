@@ -177,7 +177,8 @@
   .bar { height: 6px; border-radius: 999px; background: var(--rock); overflow: hidden; }
   .bar span { display: block; height: 100%; border-radius: inherit; background: var(--diver); }
   .goal.coins .bar span { background: var(--coin); }
-  .button-row { display: flex; gap: 8px; }
+  .button-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  button.daily { border-color: var(--coin); color: var(--coin); }
   .overlay p { margin: 0; color: var(--muted); line-height: 1.5; max-width: 26ch; }
   .overlay strong { color: var(--ink); }
   button {
@@ -294,6 +295,7 @@
       </ul>
       <p class="returning" id="returning" hidden></p>
       <button class="pulse" id="startButton">Tap to fall</button>
+      <button class="ghost daily" id="dailyButton">Daily challenge</button>
       <button class="ghost" data-open-shop>Characters &amp; badges</button>
     </div>
 
@@ -326,6 +328,7 @@
       <div class="button-row">
         <button class="ghost" id="shareButton">Share score</button>
         <button class="ghost" data-open-shop>Characters</button>
+        <button class="ghost" id="menuButton">Menu</button>
       </div>
     </div>
   </div>
@@ -469,7 +472,7 @@ function pickHole(previousHoleX, number) {
   reach = Math.max(20, reach - zone.moving);
   const min = Math.max(HOLE_WIDTH / 2, previousHoleX - reach);
   const max = Math.min(WIDTH - HOLE_WIDTH / 2, previousHoleX + reach);
-  return min + Math.random() * (max - min);
+  return min + levelRandom() * (max - min);
 }
 
 // Each ledge remembers its number (1st, 2nd, 3rd...) and how close
@@ -478,14 +481,14 @@ function makeLedge(y, holeX, number, previousHoleX) {
   // Some gaps get a coin, placed off-center so grabbing it is a choice.
   // It goes on the side you're coming from, so it's always reachable.
   let coin = null;
-  if (number > 1 && Math.random() < COIN_CHANCE) {
+  if (number > 1 && levelRandom() < COIN_CHANCE) {
     const side = previousHoleX < holeX ? -1 : 1;
     const room = HOLE_WIDTH / 2 - COIN_SIZE - 4;
-    coin = { offset: side * (room * (0.5 + Math.random() * 0.5)), taken: false };
+    coin = { offset: side * (room * (0.5 + levelRandom() * 0.5)), taken: false };
   }
   // In zones with sliding gaps, each gap gets its own starting point in the slide.
   const zone = zoneForLedge(number);
-  return { y: y, holeX: holeX, homeX: holeX, slide: zone.moving, phase: Math.random() * Math.PI * 2,
+  return { y: y, holeX: holeX, homeX: holeX, slide: zone.moving, phase: levelRandom() * Math.PI * 2,
            number: number, passed: false, closest: Infinity, centerMiss: Infinity, coin: coin };
 }
 
@@ -1076,6 +1079,9 @@ function drawHero(time) {
 
 // For returning players: a quick summary of their progress.
 function showReturning() {
+  const today = dailyBest();
+  document.getElementById("dailyButton").textContent =
+    "Daily challenge #" + todayNumber() + (today > 0 ? " · today's best " + today : "");
   const line = document.getElementById("returning");
   line.hidden = best === 0;
   line.innerHTML = "Best <strong>" + best + "</strong> · Badges <strong>" + badges.length + "/" + ZONES.length +
@@ -1104,7 +1110,41 @@ function loop(time) {
   requestAnimationFrame(loop);
 }
 
-function startGame() {
+// ===== DAILY CHALLENGE =====
+// Everyone gets the same ledges and coins on the same day, so friends can
+// compare scores fairly. The "seed" is a number made from today's date:
+// the same seed always produces the same series of "random" numbers.
+const FIRST_DAY = new Date(2026, 9, 25);   // Daily #1 was 25 October 2026
+let dailyMode = false;
+let dailyRandom = null;
+
+function todayNumber() {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((today - FIRST_DAY) / 86400000) + 1;
+}
+
+function makeSeededRandom(seed) {
+  return function () {             // a small, well-known "mulberry32" number generator
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Normal games use true randomness; the daily challenge uses today's seed.
+function levelRandom() {
+  return dailyMode && dailyRandom ? dailyRandom() : Math.random();
+}
+
+function dailyBest() {
+  return loadNumber("freefall-daily-" + todayNumber(), 0);
+}
+
+function startGame(daily = dailyMode) {
+  dailyMode = daily;
+  dailyRandom = makeSeededRandom(todayNumber() * 7919);
   resetGame();
   runSaved = false;
   badgesThisRun = [];
@@ -1140,8 +1180,13 @@ let wasNewBest = false;
 function showGameOver() {
   if (!runSaved) {
     runSaved = true;
-    wasNewBest = score > best && score > 0;
-    if (score > best) { best = score; saveNumber("freefall-best-score", best); }
+    if (dailyMode) {
+      wasNewBest = score > dailyBest() && score > 0;
+      if (wasNewBest) saveNumber("freefall-daily-" + todayNumber(), score);
+    } else {
+      wasNewBest = score > best && score > 0;
+      if (score > best) { best = score; saveNumber("freefall-best-score", best); }
+    }
     if (ledgesPassed > bestLedges) { bestLedges = ledgesPassed; saveNumber("freefall-best-ledges", bestLedges); }
   }
 
@@ -1157,11 +1202,14 @@ function showGameOver() {
   }
 
   // The headline numbers
-  document.getElementById("overWhere").textContent = zoneForLevel(level).name + " · Level " + level;
+  document.getElementById("overWhere").textContent =
+    (dailyMode ? "Daily #" + todayNumber() : zoneForLevel(level).name) + " · Level " + level;
   document.getElementById("finalScore").textContent = score;
   const bestTag = document.getElementById("bestTag");
   bestTag.className = "best-tag" + (wasNewBest ? " new" : "");
-  bestTag.textContent = wasNewBest ? "NEW BEST!" : "Best " + best;
+  if (dailyMode) bestTag.textContent = wasNewBest ? "NEW DAILY BEST!" : "Today's best " + dailyBest();
+  else bestTag.textContent = wasNewBest ? "NEW BEST!" : "Best " + best;
+  document.getElementById("restartButton").textContent = dailyMode ? "Try today's again" : "Tap to fall again";
   document.getElementById("statLedges").textContent = ledgesPassed;
   document.getElementById("statDepth").textContent = Math.floor(distanceFallen / 10) + " m";
   document.getElementById("statCoins").textContent = "+" + coinsThisRun;
@@ -1281,9 +1329,19 @@ document.getElementById("closeShop").addEventListener("click", closeShop);
 // You can start or restart by tapping anywhere, as long as the
 // crash has finished playing out.
 function tryStart() {
-  if (state === "start") startGame();
+  if (state === "start") startGame(false);
   else if (state === "crashed" && crashTime >= RESTART_DELAY) startGame();
 }
+
+document.getElementById("dailyButton").addEventListener("click", () => startGame(true));
+document.getElementById("menuButton").addEventListener("click", () => {
+  state = "start";
+  dailyMode = false;
+  resetGame();
+  showReturning();
+  document.getElementById("gameOverScreen").hidden = true;
+  document.getElementById("startScreen").hidden = false;
+});
 
 // ===== 7. CONTROLS =====
 // Keyboard: arrow keys move you. Space, Enter or an arrow starts a new game.
@@ -1365,6 +1423,10 @@ const GAME_LINK = "https://gamesbyvidal.github.io/freefall/";
 let shareFile = null;            // the score picture, made ahead of time so sharing opens instantly
 
 function shareMessage() {
+  if (dailyMode) {
+    return "📅 Freefall Daily #" + todayNumber() + ": I scored " + score + " and fell " +
+      Math.floor(distanceFallen / 10) + " m. Same ledges for everyone today. Can you beat me? " + GAME_LINK;
+  }
   return "💥 I scored " + score + " in Freefall and fell " + Math.floor(distanceFallen / 10) +
     " m into " + zoneForLevel(level).name + "!" + (wasNewBest ? " New personal best." : "") +
     " Can you beat me? " + GAME_LINK;
@@ -1395,7 +1457,7 @@ function makeScoreCard() {
   c.textAlign = "center";
   c.fillStyle = zone.ledge;
   c.font = "40px Bungee, Impact, sans-serif";
-  c.fillText("FREEFALL", 300, 70);
+  c.fillText(dailyMode ? "FREEFALL DAILY #" + todayNumber() : "FREEFALL", 300, 70);
   c.fillStyle = colors.ink;
   c.font = "150px Bungee, Impact, sans-serif";
   c.fillText(score, 300, 410);
