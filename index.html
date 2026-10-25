@@ -1403,6 +1403,8 @@ function updateFingers() {
 stage.addEventListener("pointerdown", (e) => {
   if (e.target.closest(".ghost, .shop")) return;
   stage.focus();                        // so the arrow keys reach the game
+  // On the Splat screen, only the "Tap to fall again" button restarts.
+  if (state === "crashed" && !e.target.closest("#restartButton")) return;
   if (e.pointerType !== "mouse") {
     touchMode = true;
     if (state !== "playing") tryStart();
