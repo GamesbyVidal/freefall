@@ -265,8 +265,22 @@
     overflow-y: auto;
     z-index: 2;
   }
-  .shop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .shop-head h2 { font-family: var(--display); font-weight: 400; font-size: 1.3rem; margin: 0; }
+  /* The header (with Back) stays pinned to the top while you scroll */
+  .shop-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    position: sticky; top: -18px; z-index: 1;
+    margin: -18px -14px 0; padding: 12px 14px 10px;
+    background: var(--page);
+    border-bottom: 1px solid var(--rock);
+  }
+  .shop .back-top { padding: 6px 12px; font-size: 0.85rem; white-space: nowrap; flex-shrink: 0; }
+  .shop-head .wallet { white-space: nowrap; font-size: 0.85rem; display: flex; align-items: center; gap: 5px; }
+  .shop-head .wallet::before {   /* a little coin in front of the number */
+    content: ""; width: 11px; height: 11px; border-radius: 50%; background: var(--coin);
+  }
+  .shop-head h2 { flex: 1; min-width: 0; text-align: center; overflow: hidden; }
+  @media (max-width: 360px), (max-height: 600px) { .shop-head h2 { visibility: hidden; } }   /* tiny screens: no room for the title */
+  .shop-head h2 { font-family: var(--display); font-weight: 400; font-size: 1.1rem; margin: 0; }
   .wallet { font-family: var(--display); color: var(--coin); font-variant-numeric: tabular-nums; }
   .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .card {
@@ -345,8 +359,9 @@
 
     <div class="shop" id="shop" hidden>
       <div class="shop-head">
+        <button class="ghost back-top" id="backTop">← Back</button>
         <h2>Characters</h2>
-        <span class="wallet" id="wallet">0 coins</span>
+        <span class="wallet" id="wallet" title="Your coins">0</span>
       </div>
       <div class="cards" id="cards"></div>
       <h3 class="shelf-title">Badges</h3>
@@ -1813,7 +1828,7 @@ function makeGoal(kind, text, progress, ready) {
 
 // ===== CHARACTERS SCREEN =====
 const shop = document.getElementById("shop");
-function openShop() { renderShop(); shop.hidden = false; }
+function openShop() { renderShop(); shop.hidden = false; shop.scrollTop = 0; }
 function closeShop() {
   shop.hidden = true;
   showReturning();
@@ -1821,7 +1836,7 @@ function closeShop() {
 }
 
 function renderShop() {
-  document.getElementById("wallet").textContent = coins + " coins";
+  document.getElementById("wallet").textContent = coins;
 
   // Badge shelf: earned badges show their name; the rest stay a mystery.
   const shelf = document.getElementById("badgeShelf");
@@ -1891,6 +1906,7 @@ function pickCharacter(ch) {
 
 for (const button of document.querySelectorAll("[data-open-shop]")) button.addEventListener("click", openShop);
 document.getElementById("closeShop").addEventListener("click", closeShop);
+document.getElementById("backTop").addEventListener("click", closeShop);
 
 // You can start or restart by tapping anywhere, as long as the
 // crash has finished playing out.
@@ -1915,7 +1931,7 @@ document.addEventListener("keydown", (e) => {
   const isArrow = e.key === "ArrowLeft" || e.key === "ArrowRight";
   if (isArrow || e.key === " ") e.preventDefault();
   if (state !== "playing") {
-    if (!shop.hidden) return;
+    if (!shop.hidden) { if (e.key === "Escape" || e.key === "Backspace") closeShop(); return; }
     if (isArrow || e.key === " " || e.key === "Enter") { e.preventDefault(); tryStart(); }
     if (state !== "playing") return;
   }
