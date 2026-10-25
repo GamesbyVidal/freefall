@@ -1205,9 +1205,10 @@ let onPhone = false;
 try { onPhone = window.matchMedia("(pointer: coarse)").matches; } catch (e) {}
 
 function startGame(daily = dailyMode) {
-  if (loadNumber("freefall-played", 0) === 0) saveNumber("freefall-played", 1);
+  if (loadNumber("freefall-played", 0) === 0) { saveNumber("freefall-played", 1); track("first-game", "First game ever"); }
   else firstGame = false;
   dailyMode = daily;
+  track(daily ? "play-daily" : "play", daily ? "Daily challenge game" : "Normal game");
   dailyRandom = makeSeededRandom(todayNumber() * 7919);
   resetGame();
   runSaved = false;
@@ -1221,6 +1222,7 @@ function startGame(daily = dailyMode) {
 
 function crash() {
   state = "crashed";
+  track("splat-level-" + level, "Splat on level " + level);
   crashTime = 0;
   popups = [];
   shake = 14;
@@ -1483,6 +1485,27 @@ try {
   }
 } catch (e) {}
 
+// ===== VISITOR STATS =====
+// GoatCounter (free) counts visits and a few game moments, with no cookies and
+// nothing personal. Only on the real site, so testing doesn't count.
+// See the numbers at https://gamesbyvidal.goatcounter.com
+const onRealSite = location.hostname === "gamesbyvidal.github.io";
+if (onRealSite) {
+  const counter = document.createElement("script");
+  counter.async = true;
+  counter.src = "https://gc.zgo.at/count.js";
+  counter.dataset.goatcounter = "https://gamesbyvidal.goatcounter.com/count";
+  document.head.appendChild(counter);
+}
+function track(name, title) {
+  if (!onRealSite) return;
+  try {
+    if (window.goatcounter && window.goatcounter.count) {
+      window.goatcounter.count({ path: name, title: title || name, event: true });
+    }
+  } catch (e) {}
+}
+
 // ===== SHARING =====
 // On phones, "Share score" opens the phone's own share menu with a score picture
 // and the game link. Where that isn't possible, it copies a message instead.
@@ -1549,6 +1572,7 @@ function makeScoreCard() {
 document.getElementById("shareButton").addEventListener("click", async (e) => {
   const button = e.currentTarget;
   const text = shareMessage();
+  track("share", "Pressed Share score");
   // 1. The phone's share menu, with the picture if the phone allows it
   if (navigator.share) {
     const withPicture = { text: text, files: [shareFile] };
