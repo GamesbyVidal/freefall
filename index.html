@@ -201,6 +201,7 @@
   #challengeButton { padding: 8px 16px; font-size: 0.85rem; }
   /* The main "go" buttons: big and easy to hit with a thumb */
   #startButton, #restartButton { font-size: 1.35rem; padding: 16px 20px; width: min(100%, 270px); white-space: nowrap; }
+  #startButton.long { font-size: 1rem; padding: 18px 10px; }
   #restartButton { font-size: 1.15rem; }   /* longer words: "Tap to fall again", "Try again (2 left)" */
   @media (max-height: 600px) { #restartButton { font-size: 0.95rem; padding: 14px 10px; } }
   .overlay p.stat-line { font-size: 0.85rem; max-width: none; }
@@ -439,7 +440,7 @@ const ZONES = [
 ];
 // Each zone also has a badge, earned the first time you reach it.
 // One more badge isn't for a zone: a friend you challenged played and challenged you back.
-const FRIEND_BADGE = { badge: "Deep Friends", name: "A friend took your challenge", ledge: "#5fd3a5", shaft: "#10261f" };
+const FRIEND_BADGE = { badge: "Partners in Grime", name: "A friend took your challenge", ledge: "#c9a26b", shaft: "#2a1e14" };
 const ICE_GRIP = 8;              // lower = more slippery on ice
 
 // Daily challenge twists: each day gets the next one in this list, so every
@@ -485,7 +486,7 @@ let popups = [];                 // floating messages like "Close! +1"
 let beatBestShown = false;
 let coins = loadNumber("freefall-coins", 0);   // your coin bank, kept between games
 let coinsThisRun = 0;
-let badges = loadList("freefall-badges", []).map((b) => b === "Deep Friendship" ? "Deep Friends" : b);   // badges you've earned, kept forever
+let badges = loadList("freefall-badges", []).map((b) => b === "Deep Friendship" || b === "Deep Friends" ? "Partners in Grime" : b);   // badges you've earned, kept forever
 let badgesThisRun = [];
 let diverSpeed = 0;              // your sideways speed (matters on ice)
 let clock = 0;                   // seconds since the game started, for sliding gaps
@@ -1250,34 +1251,47 @@ function drawFace(c, x, y, spread, color) {
 }
 
 // Canary: a round yellow bird wearing a miner's helmet with a lamp
-// Deep Friends: two little explorers in hard hats, tied together by a rope
-// like a climbing team.
+// Partners in Grime: two dusty pickaxes crossed, with a spark where they clink
+function drawPickaxe(c, angle, headColor) {
+  c.save();
+  c.rotate(angle);
+  // Wooden handle with a darker grip
+  c.fillStyle = "#a8703f";
+  roundedBox(c, -1.8, -11, 3.6, 27, 1.8); c.fill();
+  c.fillStyle = "#7a4c26";
+  c.fillRect(-1.8, 9, 3.6, 5);
+  // Curved metal head
+  c.fillStyle = headColor;
+  c.beginPath();
+  c.moveTo(-11, -7);
+  c.quadraticCurveTo(0, -18, 11, -7);
+  c.quadraticCurveTo(0, -13, -11, -7);
+  c.closePath(); c.fill();
+  roundedBox(c, -3.5, -15, 7, 6, 2); c.fill();
+  // Dirt on the metal
+  c.fillStyle = "#6b4a2b";
+  c.beginPath();
+  c.arc(-6, -10.5, 1.5, 0, Math.PI * 2);
+  c.arc(4, -13, 1.2, 0, Math.PI * 2);
+  c.fill();
+  c.restore();
+}
+
 function drawFriends(c) {
-  // The rope between them, sagging a little
-  c.strokeStyle = "#e8d3a8";
-  c.lineWidth = 2;
-  c.beginPath();
-  c.moveTo(-9, 9);
-  c.quadraticCurveTo(0, 17, 9, 9);
-  c.stroke();
-  for (const [x, color] of [[-10.5, "#8fd8de"], [10.5, "#b48cff"]]) {
-    c.fillStyle = color;
-    c.beginPath(); c.arc(x, 4, 7, 0, Math.PI * 2); c.fill();
-    // Hard hat with a headlamp
-    c.fillStyle = "#e8a33d";
-    c.beginPath(); c.arc(x, 1, 6.5, Math.PI, 0); c.closePath(); c.fill();
-    c.fillRect(x - 8, 0, 16, 2);
-    c.fillStyle = "#fff6c2";
-    c.beginPath(); c.arc(x, -2.5, 1.8, 0, Math.PI * 2); c.fill();
-    drawFace(c, x, 5.5, 2.6, "#1b1530");
+  drawPickaxe(c, -Math.PI / 4, "#b9c2cc");
+  drawPickaxe(c, Math.PI / 4, "#9aa6b2");
+  // Specks of grime
+  c.fillStyle = "rgba(122, 84, 48, 0.85)";
+  for (const [x, y, r] of [[-14, 10, 1.6], [13, 13, 1.4], [-9, 15, 1.1]]) {
+    c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
   }
-  // A small star: you did it together
-  c.fillStyle = "#ffd23f";
+  // Spark where they meet
+  c.fillStyle = "#fff6c2";
   c.beginPath();
-  for (let i = 0; i < 10; i++) {
-    const a = -Math.PI / 2 + (i * Math.PI) / 5;
-    const r = i % 2 === 0 ? 4.5 : 2;
-    c.lineTo(Math.cos(a) * r, -12 + Math.sin(a) * r);
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4;
+    const r = i % 2 ? 1.4 : 4.2;
+    c.lineTo(Math.cos(a) * r, -1 + Math.sin(a) * r);
   }
   c.fill();
 }
@@ -1620,7 +1634,9 @@ function showChallenge() {
   document.getElementById("challengeButton").hidden = !playedToday;
   const today = challengeToday();
   // While you haven't beaten it yet, the big button takes the challenge.
-  document.getElementById("startButton").textContent = acceptingChallenge() ? "🎯 Accept challenge" : "Tap to fall";
+  const startButton = document.getElementById("startButton");
+  startButton.textContent = acceptingChallenge() ? "🎯 Accept challenge" : "Tap to fall";
+  startButton.classList.toggle("long", acceptingChallenge());
   banner.hidden = !challenge;
   if (!challenge) return;
   if (friendBadgeNow) {
@@ -1631,7 +1647,7 @@ function showChallenge() {
     picture.style.width = picture.style.height = "44px";
     picture.style.margin = "0 auto 4px";
     const words = document.createElement("span");
-    words.innerHTML = "Your friend took your challenge! New badge: <strong>Deep Friends</strong><br>" +
+    words.innerHTML = "Your friend took your challenge! New badge: <strong>Partners in Grime</strong><br>" +
       (today ? "They scored <strong>" + today.score + "</strong>. Can you beat it?" : "");
     banner.append(picture, words);
     return;
@@ -2033,7 +2049,7 @@ let shareFile = null;            // the score picture, made ahead of time so sha
 // A challenge link carries your best daily score and the day, like
 // .../freefall/?c=63&d=2, so your friend's game knows the score to beat.
 function challengeLink() {
-  // "r=1" means "I was challenged too", so the friend who challenged me earns Deep Friends
+  // "r=1" means "I was challenged too", so the friend who challenged me earns Partners in Grime
   const reply = loadNumber("freefall-was-challenged", 0) === 1 ? "&r=1" : "";
   return GAME_LINK + "?c=" + dailyBest() + "&d=" + todayNumber() + reply;
 }
@@ -2233,7 +2249,7 @@ showSoundSetting();
 showReturning();
 if (challenge) setTimeout(() => {
   track("challenge-opened", "Opened a friend's challenge");
-  if (friendBadgeNow) track("deep-friends", "Earned Deep Friends");
+  if (friendBadgeNow) track("partners-in-grime", "Earned Partners in Grime");
 }, 1500);
 requestAnimationFrame((t) => { lastTime = t; loop(t); });
 document.fonts && document.fonts.ready.then(draw);
