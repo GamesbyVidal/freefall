@@ -125,7 +125,8 @@
   .overlay.start .tips { margin-top: 6px; }
   /* Short phone screens: shrink the start screen so the button sits higher */
   @media (max-height: 760px) {
-    .overlay.start { gap: 10px; padding: 16px; }
+    .overlay.start { gap: 10px; padding: 16px 10px; }
+    .small-buttons button { padding: 9px 12px; font-size: 0.85rem; }
     .hero { width: 72px; height: 72px; }
     .overlay.start .tips { font-size: 0.8rem; gap: 6px; }
   }
@@ -186,6 +187,18 @@
   .goal.coins .bar span { background: var(--coin); }
   .button-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
   button.daily { border-color: var(--coin); color: var(--coin); }
+  .small-buttons button { padding: 10px 14px; font-size: 0.9rem; white-space: nowrap; }
+  .new-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--coin);
+    color: var(--page);
+    font-family: var(--display);
+    font-size: 0.65rem;
+    vertical-align: 2px;
+  }
   .overlay p { margin: 0; color: var(--muted); line-height: 1.5; max-width: 26ch; }
   .overlay strong { color: var(--ink); }
   button {
@@ -296,9 +309,11 @@
       <h2>How deep can you fall?</h2>
       <p class="returning" id="returning" hidden></p>
       <button class="pulse" id="startButton">Tap to fall</button>
-      <button class="ghost daily" id="dailyButton">Daily challenge</button>
-      <button class="ghost" data-open-shop>Characters &amp; badges</button>
-      <ul class="tips">
+      <div class="button-row small-buttons">
+        <button class="ghost daily" id="dailyButton">Daily challenge</button>
+        <button class="ghost" data-open-shop>Characters</button>
+      </div>
+      <ul class="tips" id="tips">
         <li><span class="tip-icon ledge"></span>Slip through the gaps. Touch a ledge and it's over.</li>
         <li><span class="tip-icon glow"></span>Hit the glowing middle in a row for x2 and x3.</li>
         <li><span class="tip-icon coin"></span>Grab coins to unlock new characters.</li>
@@ -1071,7 +1086,9 @@ const heroCtx = hero.getContext("2d");
 
 function drawHero(time) {
   const c = heroCtx;
-  const zone = ZONES[0];
+  // The background shows the deepest zone you've reached
+  let zone = ZONES[0];
+  for (const z of ZONES) if (badges.includes(z.badge)) zone = z;
   c.clearRect(0, 0, 104, 104);
   c.fillStyle = zone.shaft;
   roundedBox(c, 0, 0, 104, 104, 16);
@@ -1087,24 +1104,46 @@ function drawHero(time) {
   // Your character, with a short trail above
   const me = currentCharacter();
   const bob = Math.sin(time / 300) * 3;
+  const sway = Math.sin(time / 900) * 6;       // drifts gently left and right
+  const x = 52 + sway, y = 48 + bob;
   c.globalAlpha = 0.25;
   c.fillStyle = me.color;
-  c.beginPath(); c.arc(52, 30 + bob, 9, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.arc(52 + sway * 0.4, 30 + bob, 9, 0, Math.PI * 2); c.fill();
   c.globalAlpha = 0.5;
-  c.beginPath(); c.arc(52, 38 + bob, 11, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.arc(52 + sway * 0.7, 38 + bob, 11, 0, Math.PI * 2); c.fill();
   c.globalAlpha = 1;
-  drawCharacter(c, me, 52, 48 + bob, 14);
+  drawCharacter(c, me, x, y, 14);
+  // Blink for a moment every few seconds: cover the eyes and draw closed lids
+  if (time % 3200 < 140) {
+    c.fillStyle = me.ring ? zone.shaft : me.color;
+    c.beginPath();
+    c.arc(x - 4.2, y + 4.2, 3.2, 0, Math.PI * 2);
+    c.arc(x + 4.2, y + 4.2, 3.2, 0, Math.PI * 2);
+    c.fill();
+    c.strokeStyle = me.ring ? me.color : colors.shaft;
+    c.lineWidth = 1.5;
+    c.beginPath();
+    c.moveTo(x - 6.5, y + 4.2); c.lineTo(x - 1.9, y + 4.2);
+    c.moveTo(x + 1.9, y + 4.2); c.lineTo(x + 6.5, y + 4.2);
+    c.stroke();
+  }
 }
 
-// For returning players: a quick summary of their progress.
+// New players see the tips. Returning players see their best and their next goal instead.
 function showReturning() {
   const today = dailyBest();
-  document.getElementById("dailyButton").textContent =
-    "Daily challenge #" + todayNumber() + (today > 0 ? " · today's best " + today : "");
+  // "NEW" until you've played today's challenge, then your score for today
+  document.getElementById("dailyButton").innerHTML = today > 0
+    ? "Today: <strong>" + today + "</strong>"
+    : "Daily #" + todayNumber() + '<span class="new-tag">NEW</span>';
+  const played = loadNumber("freefall-played", 0) > 0;
+  document.getElementById("tips").hidden = played;
   const line = document.getElementById("returning");
-  line.hidden = best === 0;
-  line.innerHTML = "Best <strong>" + best + "</strong> · Badges <strong>" + badges.length + "/" + ZONES.length +
-    "</strong> · Coins <strong>" + coins + "</strong>";
+  line.hidden = !played;
+  const nextZone = ZONES.find((z) => !badges.includes(z.badge));
+  line.innerHTML = "Best <strong>" + best + "</strong> · " + (nextZone
+    ? "Next badge: <strong>" + nextZone.badge + "</strong> at level " + nextZone.fromLevel
+    : "All <strong>" + ZONES.length + "</strong> badges earned!");
 }
 
 // Give a zone's badge the first time you reach it.
